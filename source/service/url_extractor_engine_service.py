@@ -7,6 +7,7 @@ import aiohttp
 import tldextract
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
+import asyncio
 
 # Configure logging
 logger = setup_logger(__name__)
@@ -108,6 +109,8 @@ class UrlExtractor:
         for i in range(3):
             try:
                 await self._page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                
+                await asyncio.sleep(15 * i)
 
                 original_domain = self.normalize_domain(urlparse(url).netloc.lower())
                 final_url = self._page.url

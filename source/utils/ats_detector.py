@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from urllib.parse import urlparse
 from utils.logging import setup_logger
+import tldextract
+
 
 # Configure logging
 logger = setup_logger(__name__)
@@ -135,12 +137,18 @@ class ATSDetector:
         """Extract base domain (e.g., 'example.com' from 'jobs.example.com')."""
         try:
             parsed = urlparse(url)
-            domain = parsed.netloc.lower().replace("www.", "")
-            parts = domain.split(".")
-            if len(parts) >= 2:
-                base_domain = ".".join(parts[-2:])
+            domain = parsed.netloc.lower()
+            
+            # Use tldextract to properly handle compound TLDs
+            extracted = tldextract.extract(domain)
+            
+            if extracted.domain and extracted.suffix:
+                base_domain = f"{extracted.domain}.{extracted.suffix}"
             else:
-                base_domain = domain
+                # Fallback to simple extraction if tldextract fails
+                domain = domain.replace("www.", "")
+                parts = domain.split(".")
+                base_domain = ".".join(parts[-2:]) if len(parts) >= 2 else domain
             
             logger.debug(
                 "Extracted base domain",
@@ -148,7 +156,7 @@ class ATSDetector:
                     "url": url,
                     "full_domain": domain,
                     "base_domain": base_domain,
-                    "domain_parts": parts,
+                    "subdomain": extracted.subdomain if extracted else None,
                 },
             )
             return base_domain
@@ -257,10 +265,13 @@ class ATSDetector:
         if company_domain.startswith("http"):
             company_domain_clean = cls.extract_base_domain(company_domain)
         else:
-            company_domain_clean = company_domain.lower().replace("www.", "")
-            parts = company_domain_clean.split(".")
-            if len(parts) >= 2:
-                company_domain_clean = ".".join(parts[-2:])
+            extracted = tldextract.extract(company_domain)
+            # Extract domain + suffix (handles compound TLDs correctly)
+            if extracted.domain and extracted.suffix:
+                company_domain_clean = f"{extracted.domain}.{extracted.suffix}"
+            else:
+                # Fallback to original
+                company_domain_clean = company_domain.lower().replace("www.", "")
 
         logger.debug(
             "Company domain normalized",

@@ -150,7 +150,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
         success_false = []
         success_true = []
         
-            
+        # job_filtered = ["https://traffordcentre.co.uk/careers"]
         for url in job_filtered:
             url = tracker.normalize_full_path(url, domain)
 
@@ -165,22 +165,9 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 "Scraping jobs from URL",
                 extra={"url": url},
             )
-            try:
-                result = await scraper.scrape_jobs(url)
-            except Exception as e:
-                logger.error(
-                    "Scrapping job error",
-                    extra={"error": str(e)},
-                )
-                error = {
-                    "error": str(e),
-                    "message": "Job scraping error",
-                    "success": False,
-                    "job_filter_url": url
-                }
-                error_list.append(error)
-                continue
-                
+
+            result = await scraper.scrape_jobs(url)
+            
             remaining = tracker.filter_unvisited(job_filtered)
             logger.debug(
                 "Remaining URLs to process",
@@ -190,32 +177,25 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             if result.skip_url:
                 continue
             
+            result_dict = result.to_dict()
+            result_dict["job_filter_url"] = url
+            del result_dict["jobs"]
+            
             if result.job_detail_urls:
                 ats_checked = await scraper.ats_checks(domain=domain, jobs=result.job_detail_urls)
-                result.ats_checked = ats_checked
-                all_scraped_jobs.append(result.to_dict())
+                result_dict["ats_checked"] = ats_checked
+                all_scraped_jobs.append(result_dict)
                 continue
             
             elif result.error:
-                result_dict = asdict(result)
-                del result_dict["jobs"]
-                result_dict["job_filter_url"] = url
                 error_list.append(result_dict)
                 
             elif not result.success:
-                result_dict = asdict(result)
-                del result_dict["jobs"]
-                result_dict["job_filter_url"] = url
                 success_false.append(result_dict)
             
             else:
-                result_dict = asdict(result)
-                del result_dict["jobs"]
-                result_dict["job_filter_url"] = url
                 success_true.append(result_dict)
                 
-            
-        
         await browser.stop()
         
         return_dit = {
@@ -327,9 +307,11 @@ if __name__ == "__main__":
     
     # List of URLs/domains to process
     urls_to_process = [
-        # "aceandtate.com",
-        "www.trireme.com" # linkdlin job
+        # "aceandtate.com", # redirected job page 
+        # "www.trireme.com" # linkdlin job
         # "www.lilianfaithfull.co.uk" # indeed job
+        # "traffordcentre.co.uk" # linkdin
+        "www.transparency.org.uk"
         # "bunzl-careers.co.uk/"
         # https://treehousenurseries.com/careers/
         # "treehousenurseries.com"

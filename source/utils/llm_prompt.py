@@ -32,7 +32,7 @@ PAGE CATEGORIES (choose exactly ONE):
 3. **navigation_required**
    - No job postings are visible on this page
    - The page indicates jobs exist and requires navigation to find them
-   - Examples: "View open roles", "Careers", "We're hiring"
+   - Examples: "View open roles", "Careers", "We're hiring", "Vacancies" etc
    - next_action: "navigate"
    - Populate next_action_target
 
@@ -155,7 +155,7 @@ Determine the application method:
 Return a JSON object with the following structure:
 JSON SCHEMA:
 {{
-  "is_ats": boolean,  // true if ATS detected, false if native application | email application | , null if uncertain | just description page without apply button/link
+  "is_ats": boolean,  // true if ATS detected, false if native application | email application, null if uncertain
   "confidence": string,  // "high" | "medium" | "low" | "uncertain"
   "application_type": string,  // "external_ats" | "embedded_form" | "native_form" | "email_application" | "redirect_required" | "login_required" | "unknown"
   "ats_provider": string | null,  // e.g., "Workday", "Greenhouse", "Lever", null if unknown
