@@ -16,7 +16,7 @@ from service.mongdb_service import MongoDBService
 from utils.file_storage import JobFileManager
 from typing import List, Dict, Any
 from utils.logging import setup_logger
-from dataclasses import asdict
+import time
 
 # Configure logging
 logger = setup_logger(__name__)
@@ -68,6 +68,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
         port= 9222 + agent_id
     )
     async with ChromeCDPManager(config=chrome_config) as manager:
+        start_time = time.time()
         logger.debug("ChromeCDPManager context entered")
         page = manager.page
         
@@ -150,7 +151,10 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
         success_false = []
         success_true = []
         
-        # job_filtered = ["https://traffordcentre.co.uk/careers"]
+        # job_filtered = ["https://archive.transparency.org.uk/careers", "https://www.lilianfaithfull.co.uk/our-care/care-team-training/"]
+        # job_filtered = ["https://www.lilianfaithfull.co.uk/about-us/work-with-us/"]
+        
+        total_tokens = 0
         for url in job_filtered:
             url = tracker.normalize_full_path(url, domain)
 
@@ -166,7 +170,13 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 extra={"url": url},
             )
 
+            # 1. Time tracking for scrape_jobs
+            scrape_start_time = time.time()
             result = await scraper.scrape_jobs(url)
+            scrape_duration = time.time() - scrape_start_time
+            
+            # Add scraping tokens
+            total_tokens += result.total_token
             
             remaining = tracker.filter_unvisited(job_filtered)
             logger.debug(
@@ -179,10 +189,21 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             
             result_dict = result.to_dict()
             result_dict["job_filter_url"] = url
+            result_dict["scrape_duration_seconds"] = round(scrape_duration, 2)  # Add scrape time
             del result_dict["jobs"]
             
             if result.job_detail_urls:
+                # 2. Time tracking for ats_checks
+                ats_start_time = time.time()
                 ats_checked = await scraper.ats_checks(domain=domain, jobs=result.job_detail_urls)
+                ats_duration = time.time() - ats_start_time
+                
+                # Add ATS tokens
+                total_tokens += ats_checked.get("total_tokens", 0)
+                
+                # Add ATS check duration to the response
+                ats_checked["ats_duration_seconds"] = round(ats_duration, 2)
+                
                 result_dict["ats_checked"] = ats_checked
                 all_scraped_jobs.append(result_dict)
                 continue
@@ -197,22 +218,25 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 success_true.append(result_dict)
                 
         await browser.stop()
-        
-        return_dit = {
+
+        # 3. Total time taken
+        total_duration = time.time() - start_time
+
+        return_dict = {
             "domain": domain,
             "job_urls_checked": job_filtered,
             "job_found": all_scraped_jobs,
             "error": error_list,
             "success_false": success_false,
-            "sucess_true": success_true,
+            "success_true": success_true,
             "success": True,
-            "message": "not able to find job" if len(all_scraped_jobs) == 0 else "Job found"
+            "message": "not able to find job" if len(all_scraped_jobs) == 0 else "Job found",
+            "total_duration_seconds": round(total_duration, 2),  # Total time
+            "total_urls_processed": len(job_filtered),
+            "total_token_usage": total_tokens
         }
 
-
-        
-        return return_dit
-
+        return return_dict
 
 async def process_single_url(url: str, file_manager: JobFileManager) -> dict:
     """Process a single URL and save results."""
@@ -309,9 +333,9 @@ if __name__ == "__main__":
     urls_to_process = [
         # "aceandtate.com", # redirected job page 
         # "www.trireme.com" # linkdlin job
-        # "www.lilianfaithfull.co.uk" # indeed job
+        "www.lilianfaithfull.co.uk" # indeed job
         # "traffordcentre.co.uk" # linkdin
-        "www.transparency.org.uk"
+        # "www.transparency.org.uk"
         # "bunzl-careers.co.uk/"
         # https://treehousenurseries.com/careers/
         # "treehousenurseries.com"

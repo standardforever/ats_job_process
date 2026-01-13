@@ -1,3 +1,37 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 from typing import Dict, Any
 
 
@@ -16,6 +50,8 @@ PAGE CONTENT:
 
 ---
 
+## NOTE: DO NOT Hallucinations anyting you can't find from the text 
+
 PAGE CATEGORIES (choose exactly ONE):
 
 1. **jobs_listed**
@@ -23,20 +59,14 @@ PAGE CATEGORIES (choose exactly ONE):
    - Job titles with links such as Apply, More Info, or View Details are present
    - This represents a full job listings page
 
-2. **job_listings_preview_page**
-   - A limited or featured subset of jobs is visible (eg "Featured roles")
-   - A link or button exists to view ALL jobs on another page
-   - next_action: "navigate"
-   - Populate next_action_target with the link/button to the full listings
-
-3. **navigation_required**
+2. **navigation_required**
    - No job postings are visible on this page
    - The page indicates jobs exist and requires navigation to find them
    - Examples: "View open roles", "Careers", "We're hiring", "Vacancies" etc
    - next_action: "navigate"
    - Populate next_action_target
 
-4. **single_job_posting** 
+3. **single_job_posting** 
     - A specific job opportunity is described on this page
    This includes BOTH:
 
@@ -50,8 +80,14 @@ PAGE CATEGORIES (choose exactly ONE):
       - Simple vacancy notices with contact info to apply or inquire
       - Posts that mention a position and how to apply/get more info
 
-5. **not_job_related**
+4. **not_job_related**
    - No job, career, or hiring content
+
+5. **job_listings_preview_page**
+   - A limited or featured subset of jobs is visible (eg "Featured roles")
+   - A link or button exists to view ALL jobs on another page
+   - next_action: "navigate"
+   - Populate next_action_target with the link/button to the full listings
 
 RULES:
 - Links next to job titles (Apply, View Details, More Info) are job_url, not navigation
@@ -59,6 +95,7 @@ RULES:
 - Navigation is only for finding where jobs are listed
 - If SOME jobs are shown AND a link exists to view all jobs, classify as job_listings_preview_page
 - Extract ALL jobs visible on the page only
+
 
 
 RESPONSE FORMAT:
@@ -74,7 +111,7 @@ RESPONSE SCHEMA:
     "page_category": "jobs_listed" | "job_listings_preview_page" | "navigation_required" | "single_job_posting" | "not_job_related",
     "next_action": "scrape_jobs" | "navigate" | "scrape_single_job" | "stop",
     "confidence": <float 0.0-1.0>,
-    "confidence_reason": "<brief explanation>",
+    "reasoning": string,  // DETAILED explanation of your decision
     "domain_name": "<website main domain>",
     "url": "<main url>",
 
@@ -96,46 +133,68 @@ RESPONSE SCHEMA:
     return prompt
 
 
+
+
+
 def get_job_ats_determination(page_text: str, site_domain: str | None, main_domain):
-  return f"""
+    return f"""
 You are an expert at detecting Applicant Tracking Systems (ATS) on job posting pages.
 
-You will be provided with:
-- **site_domain**: The domain of the job listing page (e.g., "company.com")
-- **page_text**: The full text content of the job page
-- **page_html**: The HTML body of the page (optional, for deeper analysis)
+CRITICAL: You must provide a definitive answer OR explicitly state uncertainty.
 
-Your task is to determine if this job posting uses an ATS and return a structured JSON response.
+## Your Task:
+Analyze the page and determine:
+1. Is this an ATS-based application?
+2. Is this page actually job-related?
+3. What is your confidence level?
 
-## Some OF ATS Detection Criteria:
-NOTE: You are not limited to this Criteria alone, use your INTERNAL REASONING as well
+## Detection Criteria:
 
-### 1. **External Apply URL (High Confidence)**
-- If there's an "Apply" button/link and the URL domain differs from site_domain
-- Common ATS domains: workday.com, greenhouse.io, lever.co, icims.com, myworkdayjobs.com, smartrecruiters.com, taleo.net, ultipro.com, bamboohr.com, jobvite.com, applytojob.com, recruiting.com, etc.
-- Example: site_domain is "tesla.com" but apply link is "tesla.wd5.myworkdayjobs.com" → ATS detected
+### HIGH CONFIDENCE ATS Indicators:
+1. **External Apply URL**: Apply button/link domain differs from site_domain
+   - Common ATS: workday.com, greenhouse.io, lever.co, icims.com, myworkdayjobs.com, smartrecruiters.com, taleo.net, etc.
+   - Example: site_domain is "tesla.com" but apply link is "tesla.wd5.myworkdayjobs.com" → ATS detected
+   
+2. **Login/Authentication Required**
+    - Page requires login, account creation, or SSO (Single Sign-On)
+    - Keywords: "Sign in to apply", "Create an account", "Login required", "Register to continue", "Please log in"
+    - OAuth providers: "Sign in with Google/LinkedIn/Microsoft"
 
-### 2. **Login/Authentication Requirements (High Confidence)**
-- Page requires login, account creation, or SSO (Single Sign-On)
-- Keywords: "Sign in to apply", "Create an account", "Login required", "Register to continue", "Please log in"
-- OAuth providers: "Sign in with Google/LinkedIn/Microsoft"
+3. **Embedded ATS Forms/iFrames**: iframe elements from external domains
 
-### 3. **Embedded ATS Forms/iFrames (High Confidence)**
-- iframe elements pointing to external domains
-- Embedded application forms from third-party providers
-- Look for iframe src attributes with different domains
+4. **ATS Branding**: "Powered by Workday", "Greenhouse ATS", "Lever", etc.
+    - Profile creation: "Complete your profile", "Build your candidate profile"
 
-### 4. **Common ATS Indicators in Text/HTML (Medium-High Confidence)**
-- Brand names: "Powered by Workday", "Greenhouse ATS", "Lever", "iCIMS", "Taleo", "BambooHR", "SmartRecruiters", "Jobvite"
-- Multi-step application: "Step 1 of 3", "Application Progress", "Continue Application"
-- Profile creation: "Complete your profile", "Build your candidate profile"
+### HIGH CONFIDENCE NON-ATS Indicators:
+1. **Direct email application**: mailto: links with no external forms
+2. **Simple contact form**: Native HTML form on same domain
+3. **Direct application instructions**: "Email resume to..." with no ATS mention
 
-### 5. **Redirect Indicators (Medium Confidence)**
-- Text like "You will be redirected to our application portal"
-- "Apply on [external site name]"
-- "This will open in a new window/tab"
+### Page Validity Checks (CRITICAL):
+**is_job_related should be FALSE if:**
+- Generic homepage content
+- 404/error page indicators
+- Job listing page (multiple jobs, not single posting)
+- "Position no longer available"/"Job expired"/"Position filled"
+- Generic "Careers" page without specific job details
+- No job title, requirements, or application method visible
 
-### 6. **Application Type Detection**
+**is_job_related should be TRUE only if:**
+- Specific job title and description present
+- Clear application method exists
+- Job requirements/qualifications listed
+
+### Confidence Levels:
+- **high**: Multiple clear indicators, definitive answer
+- **medium**: Some indicators present, reasonably certain
+- **low**: Few or conflicting indicators
+- **uncertain**: Cannot determine, need manual review OR page is not valid job posting
+
+### Button/Link Analysis
+- If apply action is a button (not a link), extract the exact button text -> apply_button_text = 'button text' | null
+- If apply action is a link, extract the full URL -> apply_url = 'apply button link/url' | null
+
+### Application Type Detection
 Determine the application method:
 - **external_ats**: Redirects to external ATS platform
 - **embedded_form**: Form embedded on same page but powered by ATS
@@ -145,55 +204,143 @@ Determine the application method:
 - **login_required**: Must authenticate first
 - **unknown**: Cannot determine from current information
 
-### 7. **Button/Link Analysis**
-- If apply action is a button (not a link), extract the exact button text
-- If apply action is a link, extract the full URL
-- Check for JavaScript-based navigation or dynamic content loading
+## Response Schema:
 
-## Response Format:
-
-Return a JSON object with the following structure:
-JSON SCHEMA:
 {{
-  "is_ats": boolean,  // true if ATS detected, false if native application | email application, null if uncertain
-  "confidence": string,  // "high" | "medium" | "low" | "uncertain"
-  "application_type": string,  // "external_ats" | "embedded_form" | "native_form" | "email_application" | "redirect_required" | "login_required" | "unknown"
-  "ats_provider": string | null,  // e.g., "Workday", "Greenhouse", "Lever", null if unknown
-  "reasoning": string,  // Detailed explanation of your decision
-  "apply_url": string | null,  // Full apply URL if available, null otherwise
-  "apply_button_text": string | null,  // Exact button text if it's a button (not a link)
-  "requires_scraping": boolean,  // true if you need to scrape apply_url to confirm
-  "indicators_found": list[string],  // List of specific indicators that led to this conclusion
-  "additional_notes": string | null,  // Any other relevant observations
-  "is_job_related": bool // true if  the page is related to job listening or job page login or job related else false
+  "is_ats": boolean | null,  // true=ATS, false=non-ATS, null=uncertain
+  "confidence": "high" | "medium" | "low" | "uncertain",
+  "is_job_related": boolean,  // FALSE if expired/listing page/generic page/careers page/home page etc
+  "application_type": "external_ats" | "embedded_form" | "native_form" | "email_application" | "login_required" | "redirect_required" | "unknown",
+  "ats_provider": string | null,
+  "reasoning": string,  // DETAILED explanation of your decision
+  "apply_url": string | null,
+  "apply_button_text": string | null,
+  "requires_scraping": boolean,  // true ONLY if you need to navigate to confirm
+  "indicators_found": list[string],
+  "page_validity_issues": list[string] | null,  // List any issues (404, expired, not job page, etc.)
+  "additional_notes": string | null
 }}
 
+## Decision Rules:
+1. If page is NOT job-related → is_job_related=false, confidence="high"
+2. If clear ATS indicators → is_ats=true, confidence="high"
+3. If clear non-ATS → is_ats=false, confidence="high"
+4. If unclear/conflicting → is_ats=null, confidence="uncertain"
+5. When uncertain, provide detailed reasoning for manual review
 
-## Important Guidelines:
-
-1. **Be thorough**: Check multiple indicators before making a determination
-2. **Domain matching is critical**: Even subdomains of different root domains indicate ATS (e.g., careers.company.com vs apply.atsystem.com)
-3. **Look for brand names**: ATS providers often have branding/footers
-4. **Multi-step = likely ATS**: Complex applications usually indicate ATS
-5. **When uncertain**: Set requires_scraping to true and provide the URL
-6. **Button vs Link**: Carefully distinguish between clickable buttons and hyperlinks
-7. **Be specific in reasoning**: Reference actual text/elements you found
-
-
-OUTPUT FORMAT:
+## Output Format:
 - Return ONLY valid JSON
 - Start with {{ and end with }}
-- Do NOT wrap in markdown code blocks (no ```json or ```)
-- No markdown, no explanations, no preamble
-- Use null for missing fields (never use empty strings)
+- NO markdown code blocks
+- Use null for missing fields
 
-site_domain: {site_domain}
+## Page Information:
+- **site_domain**: {site_domain}
+- **main_domain**: {main_domain}
+- **page_text**: {page_text}
 
-page_text: {page_text}
 
-
-Now analyze the provided job page and return your JSON response.
+Now analyze and return your JSON response.
 """
+
+# def get_job_ats_determination(page_text: str, site_domain: str | None, main_domain):
+#   return f"""
+# You are an expert at detecting Applicant Tracking Systems (ATS) on job posting pages.
+
+# You will be provided with:
+# - **site_domain**: The domain of the job listing page (e.g., "company.com")
+# - **page_text**: The full text content of the job page
+# - **page_html**: The HTML body of the page (optional, for deeper analysis)
+
+# Your task is to determine if this job posting uses an ATS and return a structured JSON response.
+
+# ## Some OF ATS Detection Criteria:
+# NOTE: You are not limited to this Criteria alone, use your INTERNAL REASONING as well
+
+# ### 1. **External Apply URL (High Confidence)**
+# - If there's an "Apply" button/link and the URL domain differs from site_domain
+# - Common ATS domains: workday.com, greenhouse.io, lever.co, icims.com, myworkdayjobs.com, smartrecruiters.com, taleo.net, ultipro.com, bamboohr.com, jobvite.com, applytojob.com, recruiting.com, etc.
+# - Example: site_domain is "tesla.com" but apply link is "tesla.wd5.myworkdayjobs.com" → ATS detected
+
+# ### 2. **Login/Authentication Requirements (High Confidence)**
+# - Page requires login, account creation, or SSO (Single Sign-On)
+# - Keywords: "Sign in to apply", "Create an account", "Login required", "Register to continue", "Please log in"
+# - OAuth providers: "Sign in with Google/LinkedIn/Microsoft"
+
+# ### 3. **Embedded ATS Forms/iFrames (High Confidence)**
+# - iframe elements pointing to external domains
+# - Embedded application forms from third-party providers
+# - Look for iframe src attributes with different domains
+
+# ### 4. **Common ATS Indicators in Text/HTML (Medium-High Confidence)**
+# - Brand names: "Powered by Workday", "Greenhouse ATS", "Lever", "iCIMS", "Taleo", "BambooHR", "SmartRecruiters", "Jobvite"
+# - Multi-step application: "Step 1 of 3", "Application Progress", "Continue Application"
+# - Profile creation: "Complete your profile", "Build your candidate profile"
+
+# ### 5. **Redirect Indicators (Medium Confidence)**
+# - Text like "You will be redirected to our application portal"
+# - "Apply on [external site name]"
+# - "This will open in a new window/tab"
+
+# ### 6. **Application Type Detection**
+# Determine the application method:
+# - **external_ats**: Redirects to external ATS platform
+# - **embedded_form**: Form embedded on same page but powered by ATS
+# - **native_form**: Direct form on company website (no ATS)
+# - **email_application**: Email-based application (mailto: link)
+# - **redirect_required**: Needs redirect to determine
+# - **login_required**: Must authenticate first
+# - **unknown**: Cannot determine from current information
+
+# ### 7. **Button/Link Analysis**
+# - If apply action is a button (not a link), extract the exact button text
+# - If apply action is a link, extract the full URL
+# - Check for JavaScript-based navigation or dynamic content loading
+
+# ## Response Format:
+
+# Return a JSON object with the following structure:
+# JSON SCHEMA:
+# {{
+#   "is_ats": boolean,  // true if ATS detected, false if native application | email application, null if uncertain
+#   "confidence": string,  // "high" | "medium" | "low" | "uncertain"
+#   "application_type": string,  // "external_ats" | "embedded_form" | "native_form" | "email_application" | "redirect_required" | "login_required" | "unknown"
+#   "ats_provider": string | null,  // e.g., "Workday", "Greenhouse", "Lever", null if unknown
+#   "reasoning": string,  // Detailed explanation of your decision
+#   "apply_url": string | null,  // Full apply URL if available, null otherwise
+#   "apply_button_text": string | null,  // Exact button text if it's a button (not a link)
+#   "requires_scraping": boolean,  // true if you need to scrape apply_url to confirm
+#   "indicators_found": list[string],  // List of specific indicators that led to this conclusion
+#   "additional_notes": string | null,  // Any other relevant observations
+#   "is_job_related": bool // true if  the page is related to job listening or job page login or job related else false
+# }}
+
+
+# ## Important Guidelines:
+
+# 1. **Be thorough**: Check multiple indicators before making a determination
+# 2. **Domain matching is critical**: Even subdomains of different root domains indicate ATS (e.g., careers.company.com vs apply.atsystem.com)
+# 3. **Look for brand names**: ATS providers often have branding/footers
+# 4. **Multi-step = likely ATS**: Complex applications usually indicate ATS
+# 5. **When uncertain**: Set requires_scraping to true and provide the URL
+# 6. **Button vs Link**: Carefully distinguish between clickable buttons and hyperlinks
+# 7. **Be specific in reasoning**: Reference actual text/elements you found
+
+
+# OUTPUT FORMAT:
+# - Return ONLY valid JSON
+# - Start with {{ and end with }}
+# - Do NOT wrap in markdown code blocks (no ```json or ```)
+# - No markdown, no explanations, no preamble
+# - Use null for missing fields (never use empty strings)
+
+# site_domain: {site_domain}
+
+# page_text: {page_text}
+
+
+# Now analyze the provided job page and return your JSON response.
+# """
 
 
 
