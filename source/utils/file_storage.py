@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 
 class JobFileManager:
@@ -12,11 +12,13 @@ class JobFileManager:
         self,
         output_dir: str = "job_outputs",
         max_records_per_file: int = 1000,
-        file_prefix: str = "jobs"
+        file_prefix: str = "jobs",
+        task_id: Optional[str] = None
     ):
         self.output_dir = Path(output_dir)
         self.max_records = max_records_per_file
         self.file_prefix = file_prefix
+        self.task_id = task_id
         self.current_file_index = 0
         self.current_records: list[dict] = []
         
@@ -34,7 +36,7 @@ class JobFileManager:
             # Get the highest index
             last_file = existing_files[-1]
             try:
-                # Extract index from filename (e.g., jobs_003.json -> 3)
+                # Extract index from filename (e.g., jobs_task123_003.json -> 3)
                 index_str = last_file.stem.split("_")[-1]
                 self.current_file_index = int(index_str)
                 
@@ -77,12 +79,17 @@ class JobFileManager:
         Add a job record to the current file.
         Automatically rotates to a new file when limit is reached.
         
+        Args:
+            job_data: The complete scrape result for one URL including ATS checks
+        
         Returns:
             dict with file info and record count
         """
         # Add metadata
         job_data["_saved_at"] = datetime.now().isoformat()
         job_data["_file_index"] = self.current_file_index
+        if self.task_id:
+            job_data["_task_id"] = self.task_id
         
         # Add to current records
         self.current_records.append(job_data)
@@ -93,7 +100,8 @@ class JobFileManager:
         result = {
             "file": str(self._get_current_filepath()),
             "record_count": len(self.current_records),
-            "file_index": self.current_file_index
+            "file_index": self.current_file_index,
+            "task_id": self.task_id
         }
         
         # Check if we need to rotate
@@ -133,37 +141,9 @@ class JobFileManager:
             "total_records": total_records,
             "current_file": str(self._get_current_filepath()),
             "current_file_records": len(self.current_records),
-            "max_records_per_file": self.max_records
+            "max_records_per_file": self.max_records,
+            "task_id": self.task_id
         }
-
-
-# Global instance (or create per-run)
-job_file_manager: Optional[JobFileManager] = None
-
-
-def save_job_to_file(job_data: dict, manager: Optional[JobFileManager] = None) -> dict:
-    """
-    Convenience function to save a job to file.
-    
-    Args:
-        job_data: The job document to save
-        manager: Optional JobFileManager instance (uses global if not provided)
-    
-    Returns:
-        dict with save info
-    """
-    global job_file_manager
-    
-    if manager:
-        return manager.add_job(job_data)
-    
-    if job_file_manager is None:
-        job_file_manager = JobFileManager()
-    
-    return job_file_manager.add_job(job_data)
-
-
-
 
 
 class TaskStorage:
@@ -229,3 +209,40 @@ class TaskStorage:
     def __contains__(self, task_id: str) -> bool:
         """Check if task exists"""
         return task_id in self.tasks
+
+
+def read_jobs_by_task_id(task_id: str, output_dir: str = "job_outputs") -> List[dict]:
+    """
+    Read all job records for a specific task_id.
+    
+    Args:
+        task_id: The task ID to filter by
+        output_dir: Directory containing job JSON files
+    
+    Returns:
+        List of job records for this task
+    """
+    output_path = Path(output_dir)
+    
+    if not output_path.exists():
+        return []
+    
+    # Find all files with this task_id in the prefix
+    pattern = f"jobs_{task_id}_*.json"
+    matching_files = sorted(output_path.glob(pattern))
+    
+    all_jobs = []
+    
+    for file_path in matching_files:
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                records = json.load(f)
+                # Double-check _task_id field matches
+                for record in records:
+                    if record.get("_task_id") == task_id:
+                        all_jobs.append(record)
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Error reading {file_path}: {e}")
+            continue
+    
+    return all_jobs

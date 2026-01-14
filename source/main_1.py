@@ -192,6 +192,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             result_dict["scrape_duration_seconds"] = round(scrape_duration, 2)  # Add scrape time
             del result_dict["jobs"]
             
+            
             if result.job_detail_urls:
                 # 2. Time tracking for ats_checks
                 ats_start_time = time.time()

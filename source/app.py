@@ -209,18 +209,11 @@ async def process_urls_with_agent(
 ):
     """Process a chunk of URLs with a single agent"""
     for url in urls_chunk:
-        # Check if task was cancelled before starting new URL
+        # Check if task was cancelled
         task_data = tasks_db.get(task_id)
         if task_data and task_data.get("cancelled", False):
-            print(f"[Agent {agent_id}] Task {task_id} was cancelled, stopping immediately...")
+            print(f"[Agent {agent_id}] Task {task_id} was cancelled, stopping...")
             return
-        
-        result = {
-            "url": url,
-            "status": "pending",
-            "jobs_found": 0,
-            "error": None
-        }
         
         # Clean domain
         domain = extract_domain(url)
@@ -228,42 +221,40 @@ async def process_urls_with_agent(
         try:
             print(f"[Agent {agent_id}] Processing: {domain}")
             
-            # Run scraper (this will be cancelled if task is cancelled)
-            jobs_response = await main_scrapper(domain=domain, agent_id=agent_id, llm_model="gpt-5-nano")
-            all_scraped_jobs = jobs_response.get("job_found", [])
-            if not all_scraped_jobs:
-                file_manager.add_job(jobs_response)
-                print("NO job found on this page")
-                return
+            # Run scraper
+            scrape_result = await main_scrapper(domain=domain, agent_id=agent_id, llm_model="gpt-4o-mini")
+            scrape_result["_task_id"] = task_id
             
-            # Check cancellation again before saving
+            # Check cancellation again
             task_data = tasks_db.get(task_id)
             if task_data and task_data.get("cancelled", False):
-                print(f"[Agent {agent_id}] Task {task_id} cancelled during scraping, stopping...")
+                print(f"[Agent {agent_id}] Task cancelled during scraping")
                 return
             
-            # Save jobs
-            for job_doc in all_scraped_jobs:   
-                save_info = file_manager.add_job(job_doc.details)
-                result["status"] = "success"
-                result["save_info"] = save_info
+            # Save the complete scrape result
+            # IMPORTANT: scrape_result is a dict, not a list
+            save_info = file_manager.add_job(scrape_result)
+            
+            print(f"[Agent {agent_id}] Saved result for {domain}: {save_info}")
             
             # Mark URL as completed
             task_data = tasks_db.get(task_id)
             if task_data and not task_data.get("cancelled", False):
                 task_data["completed_urls"].append(domain)
+                
+                # Count jobs found
+                jobs_found = len(scrape_result.get("job_found", []))
+                task_data["jobs_scraped"] = task_data.get("jobs_scraped", 0) + jobs_found
+                
                 tasks_db.set(task_id, task_data)
                 
         except asyncio.CancelledError:
-            # Task was cancelled, clean exit
-            print(f"[Agent {agent_id}] Task {task_id} cancelled while processing {domain}")
-            raise  # Re-raise to propagate cancellation
+            print(f"[Agent {agent_id}] Task {task_id} cancelled")
+            raise
             
         except Exception as e:
-            # Check if cancelled during error handling
             task_data = tasks_db.get(task_id)
             if task_data and task_data.get("cancelled", False):
-                print(f"[Agent {agent_id}] Task cancelled, not recording error for {domain}")
                 return
             
             print(f"[Agent {agent_id}] Error processing {domain}: {str(e)}")
@@ -705,28 +696,40 @@ async def cancel_all_tasks():
 # ============================================================================
 # EXPORT ENDPOINTS
 # ============================================================================
-
 @app.get("/export/csv", tags=["Export"])
 async def export_jobs_to_csv(task_id: str | None = None):
     """
-    Export all scraped jobs to CSV format and download.
+    Export scraped jobs to CSV format.
     
-    Returns a CSV file containing all job records from all scraping sessions.
-    Includes flattened data with all job fields (location, salary, requirements, etc.).
+    Args:
+        task_id: Optional task ID to filter results. If not provided, exports all jobs.
+    
+    Returns:
+        CSV file download with job data
     """
     try:
-        # Read all jobs from files
+        # Read jobs (filtered by task_id if provided)
         all_jobs = read_all_jobs_from_files(output_dir="job_outputs", task_id=task_id)
+        
+        if not all_jobs:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No jobs found{f' for task_id {task_id}' if task_id else ''}"
+            )
         
         # Generate CSV
         csv_content = generate_csv_from_jobs(all_jobs)
         
-        # Create streaming response
+        # Create filename
+        filename_suffix = f"_task_{task_id[:8]}" if task_id else ""
+        filename = f"jobs_export{filename_suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        
+        # Return as download
         return StreamingResponse(
             io.StringIO(csv_content),
             media_type="text/csv",
             headers={
-                "Content-Disposition": f"attachment; filename=jobs_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                "Content-Disposition": f"attachment; filename={filename}"
             }
         )
         
@@ -737,41 +740,54 @@ async def export_jobs_to_csv(task_id: str | None = None):
 
 
 @app.get("/export/stats", tags=["Export"])
-async def get_export_stats():
+async def get_export_stats(task_id: str | None = None):
     """
-    Get statistics about available jobs for export.
+    Get statistics about available jobs.
+    
+    Args:
+        task_id: Optional task ID to filter stats
     
     Returns:
-    - Total job count
-    - Jobs with salary information
-    - Jobs with location information
-    - Company distribution
-    - Top companies by job count
+        Statistics about jobs available for export
     """
     try:
-        all_jobs = read_all_jobs_from_files(output_dir="job_outputs")
+        all_jobs = read_all_jobs_from_files(output_dir="job_outputs", task_id=task_id)
         
-        # Calculate statistics
-        total_jobs = len(all_jobs)
-        jobs_with_salary = sum(1 for job in all_jobs if job.get("salary", {}).get("min"))
-        jobs_with_location = sum(1 for job in all_jobs if job.get("location", {}).get("city"))
+        if not all_jobs:
+            return {
+                "task_id": task_id,
+                "total_records": 0,
+                "jobs_with_ats_checked": 0,
+                "total_job_urls": 0,
+                "message": "No jobs found"
+            }
         
-        # Group by company
-        companies = {}
-        for job in all_jobs:
-            company = job.get("company_name", "Unknown")
-            companies[company] = companies.get(company, 0) + 1
+        # Calculate stats
+        total_records = len(all_jobs)
+        jobs_with_ats = sum(1 for job in all_jobs if job.get("ats_checked"))
+        total_job_urls = sum(len(job.get("job_detail_urls", [])) for job in all_jobs)
+        successful = sum(1 for job in all_jobs if job.get("success"))
+        failed = sum(1 for job in all_jobs if job.get("error"))
+        
+        # Token usage
+        total_tokens = sum(job.get("total_token", 0) for job in all_jobs)
+        ats_tokens = sum(
+            job.get("ats_checked", {}).get("total_tokens", 0) 
+            for job in all_jobs
+        )
         
         return {
-            "total_jobs": total_jobs,
-            "jobs_with_salary": jobs_with_salary,
-            "jobs_with_location": jobs_with_location,
-            "unique_companies": len(companies),
-            "top_companies": sorted(companies.items(), key=lambda x: x[1], reverse=True)[:10]
+            "task_id": task_id,
+            "total_records": total_records,
+            "successful_scrapes": successful,
+            "failed_scrapes": failed,
+            "jobs_with_ats_checked": jobs_with_ats,
+            "total_job_urls_found": total_job_urls,
+            "total_tokens_used": total_tokens,
+            "ats_tokens_used": ats_tokens,
+            "combined_tokens": total_tokens + ats_tokens
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting stats: {str(e)}")
 
@@ -845,7 +861,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
-        port=8001,
+        port=8005,
         reload=True,
         log_level="info"
     )

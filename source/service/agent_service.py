@@ -267,6 +267,10 @@ class TrackedJobScraper:
 
     async def scrape_jobs(self, url: str) -> ScrapeResult:
         try:
+            nav_count = 0
+            all_jobs: list[JobEntry] = []
+            total_token = 0
+            llm_reasoning = []
             self._current_visited = []
             logger.info(
                 "Starting tracked job scrape",
@@ -283,10 +287,7 @@ class TrackedJobScraper:
 
             await self._navigate(url)
 
-            nav_count = 0
-            all_jobs: list[JobEntry] = []
-            total_token = 0
-            llm_reasoning = []
+            
 
             while True:
                 content = await self._extractor.extract()
@@ -445,7 +446,9 @@ class TrackedJobScraper:
                                 job_detail_urls=[j.url for j in all_jobs if j.url],
                                 message="The job page is pointing to indeed/linkedin site",
                                 success=True,
-                                is_linkd_or_indeed_url=True
+                                is_linkd_or_indeed_url=True,
+                                llm_reasoning=llm_reasoning,
+                                total_token=total_token
                             )                    
                     
                         nav_url = TextProcessor.normalize_url(nav_url, page_url)
