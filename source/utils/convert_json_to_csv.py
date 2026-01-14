@@ -69,11 +69,10 @@ def flatten_ats_result(ats_result: dict) -> dict:
     
     return flattened
 
-
 def flatten_job_record(job_record: dict) -> List[dict]:
     """
     Flatten a job record into CSV rows.
-    Handles both successful scrapes and all error cases.
+    Creates ONE ROW PER JOB URL (not per scrape_result).
     
     Returns list of dicts (one or more CSV rows).
     """
@@ -90,7 +89,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         'total_token_usage': job_record.get('total_token_usage', 0),
     }
     
-    # Summary stats (may not exist for old error records)
+    # Summary stats
     summary = job_record.get('summary', {})
     base_data.update({
         'urls_checked': summary.get('urls_checked', 0),
@@ -101,18 +100,18 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         'ats_jobs_found': summary.get('ats_jobs_found', 0),
     })
     
-    # Error details (for failed domain access, etc.)
+    # Error details (for failed domain access)
     error_details = job_record.get('error_details')
     if error_details:
         base_data['error_type'] = error_details.get('error_type', '')
-        base_data['error'] = error_details.get('error', '')
+        base_data['domain_error'] = error_details.get('error', '')
         base_data['error_status'] = error_details.get('status', '')
         base_data['redirected'] = error_details.get('redirected', False)
         base_data['cancelled'] = error_details.get('cancelled', False)
     
-    # Check for legacy error format (old structure without standardization)
+    # Check for legacy error format
     if 'error' in job_record and not error_details:
-        base_data['error'] = job_record.get('error', '')
+        base_data['domain_error'] = job_record.get('error', '')
         base_data['error_status'] = job_record.get('status', '')
     
     # Process scrape results
@@ -124,47 +123,102 @@ def flatten_job_record(job_record: dict) -> List[dict]:
     
     # Process each scrape result
     for scrape_result in scrape_results:
-        row = base_data.copy()
-        
-        # Scrape info
-        row['scraped_url'] = scrape_result.get('url', '')
-        row['scrape_status'] = scrape_result.get('status', '')
-        row['scrape_duration_seconds'] = scrape_result.get('scrape_duration_seconds', 0)
-        row['result_type'] = scrape_result.get('result_type', '')
-        row['scrape_error'] = scrape_result.get('error', '')
-        
-        # Jobs found
-        jobs = scrape_result.get('jobs', {})
-        row['job_count'] = jobs.get('count', 0)
-        row['job_urls'] = ', '.join(jobs.get('job_urls', []))
+        # Scrape-level data (common to all jobs from this URL)
+        scrape_data = base_data.copy()
+        scrape_data['scraped_url'] = scrape_result.get('url', '')
+        scrape_data['scrape_status'] = scrape_result.get('status', '')
+        scrape_data['scrape_duration_seconds'] = scrape_result.get('scrape_duration_seconds', 0)
+        scrape_data['result_type'] = scrape_result.get('result_type', '')
+        scrape_data['scrape_error'] = scrape_result.get('error', '')
         
         # Scraping details
         details = scrape_result.get('scraping_details', {})
-        row['scrape_tokens'] = details.get('total_tokens', 0)
-        row['scrape_llm_iterations'] = details.get('llm_iterations', 0)
-        row['scrape_message'] = details.get('message', '')
-        row['visited_urls'] = ', '.join(details.get('visited_urls', []))
+        scrape_data['scrape_tokens'] = details.get('total_tokens', 0)
+        scrape_data['scrape_llm_iterations'] = details.get('llm_iterations', 0)
+        scrape_data['scrape_message'] = details.get('message', '')
+        scrape_data['visited_urls'] = ', '.join(details.get('visited_urls', []))
         
-        # ATS check info
-        ats_check = scrape_result.get('ats_check')
-        if ats_check:
-            row['ats_duration_seconds'] = ats_check.get('duration_seconds', 0)
-            row['ats_total_tokens'] = ats_check.get('total_tokens', 0)
-            row['ats_jobs_processed'] = ats_check.get('jobs_processed', 0)
+        # LLM Reasoning - flatten the array
+        llm_reasoning = details.get('llm_reasoning', [])
+        if llm_reasoning:
+            # Option 1: Concatenate all reasoning text
+            reasoning_texts = [r.get('reasoning', '') for r in llm_reasoning]
+            scrape_data['llm_reasoning_text'] = ' | '.join(reasoning_texts)
             
-            # Get first ATS result
-            ats_results = ats_check.get('results', [])
-            if ats_results:
-                first_ats = ats_results[0]
-                row['ats_status'] = first_ats.get('status', '')
-                row['ats_is_ats'] = first_ats.get('is_ats', '')
-                row['ats_provider'] = first_ats.get('ats_provider', '')
-                row['ats_confidence'] = first_ats.get('confidence', '')
-                row['ats_application_type'] = first_ats.get('application_type', '')
-                row['ats_reasoning'] = first_ats.get('reasoning', '')
-                row['ats_job_url'] = first_ats.get('job_url', '')
+            # Option 2: Include confidence scores
+            confidence_scores = [str(r.get('confidence', '')) for r in llm_reasoning]
+            scrape_data['llm_confidence_scores'] = ', '.join(confidence_scores)
+            
+            # Option 3: Token usage per iteration
+            token_usage = [str(r.get('token_usage', 0)) for r in llm_reasoning]
+            scrape_data['llm_token_usage'] = ', '.join(token_usage)
+            
+            # Option 4: URLs analyzed
+            urls_analyzed = [r.get('url', '') for r in llm_reasoning]
+            scrape_data['llm_urls_analyzed'] = ' | '.join(urls_analyzed)
+            
+            # Option 5: Full JSON (for advanced users)
+            import json
+            scrape_data['llm_reasoning_json'] = json.dumps(llm_reasoning)
         
-        rows.append(row)
+        # Get jobs and ATS results
+        jobs = scrape_result.get('jobs', {})
+        job_urls = jobs.get('job_urls', [])
+        
+        ats_check = scrape_result.get('ats_check')
+        ats_results = ats_check.get('results', []) if ats_check else []
+        
+        # CRITICAL: Create one row per job URL with its corresponding ATS result
+        if job_urls and ats_results:
+            # Match each job URL with its ATS result
+            for i, job_url in enumerate(job_urls):
+                row = scrape_data.copy()
+                row['job_url'] = job_url
+                row['job_index'] = i + 1
+                row['total_jobs_found'] = len(job_urls)
+                
+                # Add ATS check duration (same for all jobs)
+                row['ats_duration_seconds'] = ats_check.get('duration_seconds', 0)
+                row['ats_total_tokens'] = ats_check.get('total_tokens', 0)
+                row['ats_jobs_processed'] = ats_check.get('jobs_processed', 0)
+                
+                # Get corresponding ATS result (if it exists)
+                if i < len(ats_results):
+                    ats_result = ats_results[i]
+                    row['ats_status'] = ats_result.get('status', '')
+                    row['ats_is_ats'] = ats_result.get('is_ats', '')
+                    row['ats_provider'] = ats_result.get('ats_provider', '')
+                    row['ats_confidence'] = ats_result.get('confidence', '')
+                    row['ats_application_type'] = ats_result.get('application_type', '')
+                    row['ats_reasoning'] = ats_result.get('reasoning', '')
+                    row['ats_detection_method'] = ats_result.get('detection_method', '')
+                    row['ats_job_url'] = ats_result.get('job_url', '')
+                    row['ats_current_url'] = ats_result.get('current_url', '')
+                    row['ats_token_usage'] = ats_result.get('token_usage', 0)
+                    row['ats_requires_manual_review'] = ats_result.get('requires_manual_review', False)
+                    row['ats_redirect_type'] = ats_result.get('redirect_type', '')
+                    
+                    # Indicators
+                    indicators = ats_result.get('indicators_found', [])
+                    row['ats_indicators'] = ', '.join(indicators) if indicators else ''
+                
+                rows.append(row)
+                
+        elif job_urls:
+            # Jobs found but no ATS check (shouldn't happen, but handle it)
+            for i, job_url in enumerate(job_urls):
+                row = scrape_data.copy()
+                row['job_url'] = job_url
+                row['job_index'] = i + 1
+                row['total_jobs_found'] = len(job_urls)
+                rows.append(row)
+                
+        else:
+            # No jobs found - one row for the scrape result
+            row = scrape_data.copy()
+            row['job_url'] = ''
+            row['total_jobs_found'] = 0
+            rows.append(row)
     
     return rows
 
