@@ -8,6 +8,7 @@ from service.job_analyzer import JobPageAnalyzer, AnalysisPromptType
 from utils.logging import setup_logger
 from utils.text_processor import TextProcessor
 from urllib.parse import urlparse, urlunparse
+import tldextract
 from utils.ats_detector import  ATSDetector
 
 # Configure logging

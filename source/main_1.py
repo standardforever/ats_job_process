@@ -224,11 +224,11 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
 
         return_dict = {
             "domain": domain,
-            "job_urls_checked": job_filtered,
-            "job_found": all_scraped_jobs,
-            "error": error_list,
-            "success_false": success_false,
-            "success_true": success_true,
+            "job_urls_checked": job_filtered, # all urls checked for jobs
+            "job_found": all_scraped_jobs, # all jobs found
+            "error": error_list, # error occurs
+            "success_false": success_false, # success and no job return
+            "success_true": success_true,  # success and return jobs
             "success": True,
             "message": "not able to find job" if len(all_scraped_jobs) == 0 else "Job found",
             "total_duration_seconds": round(total_duration, 2),  # Total time
@@ -265,7 +265,6 @@ async def process_single_url(url: str, file_manager: JobFileManager) -> dict:
         print(f"Error processing {url}: {e}")
     
     return result
-
 
 async def main_batch(urls: list[str], max_records_per_file: int = 50):
     """
@@ -324,7 +323,6 @@ async def main_batch(urls: list[str], max_records_per_file: int = 50):
     print(f"\nStorage stats: {file_manager.get_stats()}")
     
     return results
-
 
 if __name__ == "__main__":
     import asyncio
