@@ -85,7 +85,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         'task_id': job_record.get('_task_id', ''),
         'saved_at': job_record.get('_saved_at', ''),
         'domain': job_record.get('domain', ''),
-        'success': job_record.get('success', False),
+        # 'success': job_record.get('success', False),
         'message': job_record.get('message', ''),
         'total_duration_seconds': job_record.get('total_duration_seconds', 0),
         'total_token_usage': job_record.get('total_token_usage', 0),
@@ -99,7 +99,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         # 'successful_scrapes': summary.get('successful_scrapes', 0),
         # 'failed_scrapes': summary.get('failed_scrapes', 0),
         'linkedin_indeed_redirects': summary.get('linkedin_indeed_redirects', 0),
-        'ats_jobs_found': summary.get('ats_jobs_found', 0),
+        # 'ats_jobs_found': summary.get('ats_jobs_found', 0),
     })
     
     ats_detection = job_record.get("ats_detection", {})
@@ -113,7 +113,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         'detection_method': ats_detection.get('detection_method', None),
     })
     
-    
+    return [base_data]
     # Error details (for failed domain access)
     error_details = job_record.get('error_details')
     # print(error_details)
@@ -123,7 +123,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         base_data['error_status'] = error_details.get('status', '')
         base_data['redirected'] = error_details.get('redirected', False)
         base_data['cancelled'] = error_details.get('cancelled', False)
-    return [base_data]
+    
     
     # Check for legacy error format
     if 'error' in job_record and not error_details:

@@ -27,6 +27,7 @@ logger = setup_logger(__name__)
 async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: int = 0) -> Dict[str, Any]:
     browser = None  # Initialize at top
     manager = None
+    run_status = None
     start_time = time.time()
     
     try:
@@ -84,17 +85,22 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                 if not fallback_urls.get("success"):
                     error_type = "domain_access_failed"
                     message = "Failed to access domain or load homepage"
+                    run_status = "Domain Failed"
                     error = fallback_urls.get("error", "Unknown error")
                     status = fallback_urls.get("status", "")
+                    
                 else:
                     error_type = "domain_redirected"
-                    message = f"Domain redirected from {meta_data.get('original_domain')} to {meta_data.get('final_domain')}"
+                    final_domain = meta_data.get('final_domain', 'unknown')
+                    message = f"Domain redirected from {meta_data.get('original_domain')} to {final_domain}"
                     error = f"Redirect detected: {meta_data.get('original_url')} → {meta_data.get('final_url')}"
                     status = "redirected"
+                    run_status = f"Domain Redirected to {final_domain}"
                 
                 return {
                     "domain": domain,
                     "success": False,
+                    "run_status": run_status,
                     "message": message,
                     "total_duration_seconds": round(total_duration, 2),
                     "total_urls_processed": 0,
@@ -136,6 +142,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                 return {
                     "domain": domain,
                     "success": False,
+                    "run_status": "No Job Pages Found",
                     "message": "Was not able to find job/career page",
                     "total_duration_seconds": round(total_duration, 2),
                     "total_urls_processed": 0,
@@ -339,6 +346,20 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                     "status": first_uncertain.get("status"),
                     "error": first_uncertain.get("error")
                 }
+            # Determine run_status based on results
+            if stats["linkedin_indeed_redirects"] > 0:
+                run_status = "LinkedIn/Indeed Redirect"
+            elif priority_ats_detection is None:
+                run_status = "No Jobs Found"
+            elif priority_ats_detection["ats_status"] == "true":
+                provider = priority_ats_detection.get("ats_provider", "Unknown")
+                run_status = f"ATS Detected - {provider}"
+            elif priority_ats_detection["ats_status"] == "false":
+                run_status = "No ATS - Direct Application"
+            elif priority_ats_detection["ats_status"] == "uncertain":
+                run_status = "Uncertain - Manual Review Needed"
+            else:
+                run_status = "Completed"
             
             # Build comprehensive message
             message_parts = []
@@ -386,6 +407,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                 "domain": domain,
                 "success": stats["successful_scrapes"] > 0 or stats["linkedin_indeed_redirects"] > 0,
                 "message": summary_message,
+                "run_status": run_status,
                 
                 # TOP-LEVEL PRIORITY ATS DETECTION
                 "ats_detection": priority_ats_detection,
@@ -432,6 +454,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
         return {
             "domain": domain,
             "success": False,
+            "run_status": run_status,
             "error": "Task was cancelled",
             "message": "Scraping task was cancelled by user",
             "total_duration_seconds": round(total_duration, 2),
@@ -471,6 +494,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             "success": False,
             "error": str(e),
             "error_type": type(e).__name__,
+            "run_status": f"Error - {type(e).__name__}",
             "message": f"Critical error during scraping: {str(e)}",
             "total_duration_seconds": round(total_duration, 2),
             "total_urls_processed": 0,
