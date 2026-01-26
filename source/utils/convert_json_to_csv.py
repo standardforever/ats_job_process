@@ -89,6 +89,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         'message': job_record.get('message', ''),
         'total_duration_seconds': job_record.get('total_duration_seconds', 0),
         'total_token_usage': job_record.get('total_token_usage', 0),
+        "run_status": job_record.get("run_status")
     }
     
     # Summary stats
