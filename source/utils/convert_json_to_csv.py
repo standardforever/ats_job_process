@@ -103,7 +103,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         # 'ats_jobs_found': summary.get('ats_jobs_found', 0),
     })
     
-    ats_detection = job_record.get("ats_detection", {})
+    ats_detection = job_record.get("ats_detection") or {}
     base_data.update({
         'ats_status': ats_detection.get('ats_status', None),
         'job_url': ats_detection.get('job_url', None),
