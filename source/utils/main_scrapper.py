@@ -176,9 +176,18 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                 "successful_scrapes": 0,
                 "failed_scrapes": 0,
                 "linkedin_indeed_redirects": 0,
-                "ats_jobs_found": 0
+                "ats_jobs_found": 0,
+                "ats_results": {
+                    "ats_true": [],      # Jobs confirmed as ATS
+                    "ats_false": [],     # Jobs confirmed as NOT ATS
+                    "ats_uncertain": []  # Jobs we couldn't determine
+                }
             }
             
+            scrape_results = []
+            total_tokens = 0
+            start_time = time.time()
+            complete = False
             # SCRAPING LOOP MUST BE INSIDE THE 'async with' BLOCK
             for url in job_filtered:
                 url = tracker.normalize_full_path(url, domain)
@@ -244,12 +253,31 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                         "results": ats_checked.get("results", [])
                     }
                     
+                    # Categorize ATS results with filter URL context
                     ats_results = ats_checked.get("results", [])
-                    stats["ats_jobs_found"] += sum(
-                        1 for r in ats_results 
-                        if r.get("status") == "success" and r.get("is_ats") == True
-                    )
-                    
+                    for ats_result in ats_results:
+                        job_info = {
+                            "job_url": ats_result.get("job_url"),
+                            "filter_url": url,  # Track which filter URL led to this job
+                            "ats_provider": ats_result.get("ats_provider"),
+                            "confidence": ats_result.get("confidence"),
+                            "reasoning": ats_result.get("reasoning"),
+                            "detection_method": ats_result.get("detection_method")
+                        }
+                        
+                        if ats_result.get("status") == "success":
+                            if ats_result.get("is_ats") == True:
+                                stats["ats_results"]["ats_true"].append(job_info)
+                                stats["ats_jobs_found"] += 1
+                                complete = True
+                            elif ats_result.get("is_ats") == False:
+                                stats["ats_results"]["ats_false"].append(job_info)
+                        else:
+                            # Status is "uncertain" or "error"
+                            job_info["status"] = ats_result.get("status")
+                            job_info["error"] = ats_result.get("error")
+                            stats["ats_results"]["ats_uncertain"].append(job_info)
+                            
                 elif not result.success:
                     scrape_result["result_type"] = "no_jobs_found"
                     stats["failed_scrapes"] += 1
@@ -259,7 +287,9 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                     stats["successful_scrapes"] += 1
                 
                 scrape_results.append(scrape_result)
-            
+                
+                if complete == True:
+                    break
             # Clean up browser BEFORE exiting context
             if browser:
                 await browser.stop()
@@ -267,18 +297,88 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             # STILL INSIDE THE 'async with' BLOCK
             total_duration = time.time() - start_time
             
+            # Determine priority ATS result
+            # Priority: true > false > uncertain > none
+            priority_ats_detection = None
+            
+            if stats["ats_results"]["ats_true"]:
+                # Prioritize TRUE - take the first one
+                first_true = stats["ats_results"]["ats_true"][0]
+                priority_ats_detection = {
+                    "ats_status": "true",
+                    "job_url": first_true["job_url"],
+                    "filter_url": first_true["filter_url"],
+                    "ats_provider": first_true["ats_provider"],
+                    "confidence": first_true["confidence"],
+                    "reasoning": first_true["reasoning"],
+                    "detection_method": first_true["detection_method"]
+                }
+            elif stats["ats_results"]["ats_false"]:
+                # Prioritize FALSE if no TRUE found
+                first_false = stats["ats_results"]["ats_false"][0]
+                priority_ats_detection = {
+                    "ats_status": "false",
+                    "job_url": first_false["job_url"],
+                    "filter_url": first_false["filter_url"],
+                    "ats_provider": first_false.get("ats_provider"),  # Usually null for false
+                    "confidence": first_false["confidence"],
+                    "reasoning": first_false["reasoning"],
+                    "detection_method": first_false["detection_method"]
+                }
+            elif stats["ats_results"]["ats_uncertain"]:
+                # Show UNCERTAIN if only uncertain results
+                first_uncertain = stats["ats_results"]["ats_uncertain"][0]
+                priority_ats_detection = {
+                    "ats_status": "uncertain",
+                    "job_url": first_uncertain["job_url"],
+                    "filter_url": first_uncertain["filter_url"],
+                    "ats_provider": first_uncertain.get("ats_provider"),
+                    "confidence": first_uncertain.get("confidence", "uncertain"),
+                    "reasoning": first_uncertain["reasoning"],
+                    "detection_method": first_uncertain["detection_method"],
+                    "status": first_uncertain.get("status"),
+                    "error": first_uncertain.get("error")
+                }
+            
+            # Build comprehensive message
             message_parts = []
             message_parts.append(f"Completed scraping {len(job_filtered)} URL(s).")
-            message_parts.append(f"Found {stats['jobs_found']} jobs.")
+            message_parts.append(f"Found {stats['jobs_found']} jobs total.")
             
+            # ATS True summary
+            if stats["ats_results"]["ats_true"]:
+                ats_true_count = len(stats["ats_results"]["ats_true"])
+                message_parts.append(f"\n✓ ATS Detected ({ats_true_count} jobs):")
+                for job in stats["ats_results"]["ats_true"]:
+                    provider = job.get('ats_provider', 'Unknown')
+                    message_parts.append(f"  • {job['job_url']}")
+                    message_parts.append(f"    Provider: {provider} | Filter: {job['filter_url']}")
+            
+            # ATS False summary
+            if stats["ats_results"]["ats_false"]:
+                ats_false_count = len(stats["ats_results"]["ats_false"])
+                message_parts.append(f"\n✗ No ATS Detected ({ats_false_count} jobs):")
+                for job in stats["ats_results"]["ats_false"]:
+                    message_parts.append(f"  • {job['job_url']}")
+                    message_parts.append(f"    Filter: {job['filter_url']}")
+            
+            # Uncertain summary
+            if stats["ats_results"]["ats_uncertain"]:
+                uncertain_count = len(stats["ats_results"]["ats_uncertain"])
+                message_parts.append(f"\n? Uncertain/Needs Review ({uncertain_count} jobs):")
+                for job in stats["ats_results"]["ats_uncertain"]:
+                    status_info = f"Status: {job.get('status', 'unknown')}"
+                    message_parts.append(f"  • {job['job_url']}")
+                    message_parts.append(f"    {status_info} | Filter: {job['filter_url']}")
+                    if job.get('reasoning'):
+                        message_parts.append(f"    Reason: {job['reasoning'][:100]}")
+            
+            # Additional stats
             if stats["linkedin_indeed_redirects"] > 0:
-                message_parts.append(f"{stats['linkedin_indeed_redirects']} URL(s) redirected to LinkedIn/Indeed.")
-            
-            if stats["ats_jobs_found"] > 0:
-                message_parts.append(f"{stats['ats_jobs_found']} jobs use ATS.")
+                message_parts.append(f"\n{stats['linkedin_indeed_redirects']} URL(s) redirected to LinkedIn/Indeed.")
             
             if stats["failed_scrapes"] > 0:
-                message_parts.append(f"{stats['failed_scrapes']} scrapes failed.")
+                message_parts.append(f"\n{stats['failed_scrapes']} scrapes failed.")
             
             summary_message = " ".join(message_parts)
 
@@ -286,6 +386,10 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                 "domain": domain,
                 "success": stats["successful_scrapes"] > 0 or stats["linkedin_indeed_redirects"] > 0,
                 "message": summary_message,
+                
+                # TOP-LEVEL PRIORITY ATS DETECTION
+                "ats_detection": priority_ats_detection,
+                
                 "total_duration_seconds": round(total_duration, 2),
                 "total_urls_processed": len(job_filtered),
                 "total_token_usage": total_tokens,
@@ -295,11 +399,20 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                     "successful_scrapes": stats["successful_scrapes"],
                     "failed_scrapes": stats["failed_scrapes"],
                     "linkedin_indeed_redirects": stats["linkedin_indeed_redirects"],
-                    "ats_jobs_found": stats["ats_jobs_found"]
+                    "ats_jobs_found": stats["ats_jobs_found"],
+                    # Enhanced ATS breakdown
+                    "ats_breakdown": {
+                        "ats_true_count": len(stats["ats_results"]["ats_true"]),
+                        "ats_false_count": len(stats["ats_results"]["ats_false"]),
+                        "ats_uncertain_count": len(stats["ats_results"]["ats_uncertain"]),
+                        "ats_true_jobs": stats["ats_results"]["ats_true"],
+                        "ats_false_jobs": stats["ats_results"]["ats_false"],
+                        "ats_uncertain_jobs": stats["ats_results"]["ats_uncertain"]
+                    }
                 },
                 "scrape_results": scrape_results
             }
-                
+
                 
     except asyncio.CancelledError:
         logger.warning(

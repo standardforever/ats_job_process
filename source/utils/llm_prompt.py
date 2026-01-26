@@ -1,37 +1,5 @@
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 from typing import Dict, Any
 
 
@@ -192,6 +160,7 @@ Analyze the page and determine:
 
 ### Button/Link Analysis
 - If apply action is a button (not a link), extract the exact button text -> apply_button_text = 'button text' | null
+- If we see things like 'View Details' or "More information" or action button to see more about the job, extract button text -> apply_button_text = button_text | null
 - If apply action is a link, extract the full URL -> apply_url = 'apply button link/url' | null
 
 ### Application Type Detection
@@ -215,6 +184,7 @@ Determine the application method:
   "reasoning": string,  // DETAILED explanation of your decision
   "apply_url": string | null,
   "apply_button_text": string | null,
+  "detail_button": string | null, # to see more about the job 
   "requires_scraping": boolean,  // true ONLY if you need to navigate to confirm
   "indicators_found": list[string],
   "page_validity_issues": list[string] | null,  // List any issues (404, expired, not job page, etc.)

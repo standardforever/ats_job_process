@@ -559,8 +559,13 @@ class TrackedJobScraper:
 
         
     async def ats_checks(self, jobs: list[str], domain: str):
-        results = []  # Process all jobs, not just first one
+        """
+        Enhanced to stop on first definitive result (true/false)
+        Continue checking if uncertain until we get a definitive answer or exhaust all jobs
+        """
+        results = []
         total_tokens = 0
+        found_definitive = False
         
         for i, job_url in enumerate(jobs):
             result = await self._process_single_job(job_url, domain)
@@ -569,15 +574,36 @@ class TrackedJobScraper:
             # Accumulate tokens
             total_tokens += result.get("token_usage", 0)
             
-            # Optional: Stop on first successful
-            if result.get("status") == "success":
+            # Stop on first DEFINITIVE result (is_ats is True or False with success status)
+            if result.get("status") == "success" and result.get("is_ats") is not None:
+                found_definitive = True
+                logger.info(
+                    "Found definitive ATS result, stopping checks",
+                    extra={
+                        "job_url": job_url,
+                        "is_ats": result.get("is_ats"),
+                        "confidence": result.get("confidence")
+                    }
+                )
                 break
+            
+            # Continue if uncertain or error - we want to try to get a definitive answer
+            logger.debug(
+                "ATS result uncertain/error, continuing to next job",
+                extra={
+                    "job_url": job_url,
+                    "status": result.get("status"),
+                    "jobs_remaining": len(jobs) - i - 1
+                }
+            )
         
         return {
             "results": results,
             "total_tokens": total_tokens,
-            "jobs_processed": len(results)
+            "jobs_processed": len(results),
+            "found_definitive": found_definitive
         }
+
 
     async def _process_single_job(self, job_url: str, domain: str):
         """Process a single job URL and return standardized result"""
@@ -640,7 +666,7 @@ class TrackedJobScraper:
                 prompt_type=AnalysisPromptType.STRUCTURED,
                 main_domain=domain
             )
-            
+     
             # Track tokens from first analysis
             token_usage += analysis.token_usage if hasattr(analysis, 'token_usage') else 0
 

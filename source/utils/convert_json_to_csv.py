@@ -33,16 +33,18 @@ def read_all_jobs_from_files(output_dir: str = "job_outputs", task_id: str = Non
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 records = json.load(f)
+                all_jobs.extend(records)
                 
                 # Filter by task_id if provided
-                if task_id:
-                    records = [r for r in records if r.get("_task_id") == task_id]
-                all_jobs.extend(records)
+                
+                # if task_id:
+                #     records = [r for r in records if r.get("_task_id") == task_id]
+                # all_jobs.extend(records)
+                
                 
         except (json.JSONDecodeError, IOError) as e:
             print(f"Error reading {file_path}: {e}")
             continue
-    
     return all_jobs
 
 
@@ -92,22 +94,36 @@ def flatten_job_record(job_record: dict) -> List[dict]:
     # Summary stats
     summary = job_record.get('summary', {})
     base_data.update({
-        'urls_checked': summary.get('urls_checked', 0),
+        # 'urls_checked': summary.get('urls_checked', 0),
         'jobs_found': summary.get('jobs_found', 0),
-        'successful_scrapes': summary.get('successful_scrapes', 0),
-        'failed_scrapes': summary.get('failed_scrapes', 0),
+        # 'successful_scrapes': summary.get('successful_scrapes', 0),
+        # 'failed_scrapes': summary.get('failed_scrapes', 0),
         'linkedin_indeed_redirects': summary.get('linkedin_indeed_redirects', 0),
         'ats_jobs_found': summary.get('ats_jobs_found', 0),
     })
     
+    ats_detection = job_record.get("ats_detection", {})
+    base_data.update({
+        'ats_status': ats_detection.get('ats_status', None),
+        'job_url': ats_detection.get('job_url', None),
+        'filter_url': ats_detection.get('filter_url', None),
+        'ats_provider': ats_detection.get('ats_provider', None),
+        'confidence': ats_detection.get('confidence', None),
+        'reasoning': ats_detection.get('reasoning', None),
+        'detection_method': ats_detection.get('detection_method', None),
+    })
+    
+    
     # Error details (for failed domain access)
     error_details = job_record.get('error_details')
+    # print(error_details)
     if error_details:
         base_data['error_type'] = error_details.get('error_type', '')
         base_data['domain_error'] = error_details.get('error', '')
         base_data['error_status'] = error_details.get('status', '')
         base_data['redirected'] = error_details.get('redirected', False)
         base_data['cancelled'] = error_details.get('cancelled', False)
+    return [base_data]
     
     # Check for legacy error format
     if 'error' in job_record and not error_details:
