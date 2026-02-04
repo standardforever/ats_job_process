@@ -114,7 +114,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         'detection_method': ats_detection.get('detection_method', None),
     })
     
-    return [base_data]
+    # return [base_data]
     # Error details (for failed domain access)
     error_details = job_record.get('error_details')
     # print(error_details)

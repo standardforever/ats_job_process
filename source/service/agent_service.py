@@ -9,6 +9,7 @@ from utils.logging import setup_logger
 from utils.text_processor import TextProcessor
 from urllib.parse import urlparse, urlunparse
 import tldextract
+from urllib.parse import urlparse
 from utils.ats_detector import  ATSDetector
 
 # Configure logging
@@ -39,6 +40,7 @@ class ScrapeResult:
     total_token: int = 0
     is_linkd_or_indeed_url: bool = False
     ats_checked: dict = field(default_factory=dict)
+    job_alert: bool = False
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -272,6 +274,9 @@ class TrackedJobScraper:
             total_token = 0
             llm_reasoning = []
             self._current_visited = []
+            job_alert = False
+            
+            
             logger.info(
                 "Starting tracked job scrape",
                 extra={"url": url},
@@ -317,6 +322,7 @@ class TrackedJobScraper:
                 })
                 total_token += analysis.token_usage
                 result = analysis.response
+                job_alert = result.get("job_alert")
                 page_category = result.get("page_category", "not_job_related")
                 logger.debug(
                     "Analysis result",
@@ -332,7 +338,7 @@ class TrackedJobScraper:
                         "Page not job related",
                         extra={"url": url},
                     )
-                    return ScrapeResult(jobs=all_jobs, visited_urls=self._current_visited, job_detail_urls=[j.url for j in all_jobs if j.url], message="Page not job related", success=False, total_token=total_token, llm_reasoning=llm_reasoning)
+                    return ScrapeResult(jobs=all_jobs, visited_urls=self._current_visited, job_detail_urls=[j.url for j in all_jobs if j.url], message="Page not job related", success=False, total_token=total_token, llm_reasoning=llm_reasoning, job_alert=job_alert)
 
                 elif page_category == "single_job_posting":
                     logger.info(
@@ -361,7 +367,8 @@ class TrackedJobScraper:
                         visited_urls=self._current_visited,
                         job_detail_urls=[j.url for j in all_jobs if j.url],
                         success=True,
-                        total_token=total_token, llm_reasoning=llm_reasoning
+                        total_token=total_token, llm_reasoning=llm_reasoning,
+                        job_alert=job_alert
                     )
                 
                 elif page_category == "jobs_listed":
@@ -389,7 +396,8 @@ class TrackedJobScraper:
                         visited_urls=self._current_visited,
                         job_detail_urls=[j.url for j in all_jobs if j.url],
                         success=True,
-                        total_token=total_token, llm_reasoning=llm_reasoning
+                        total_token=total_token, llm_reasoning=llm_reasoning,
+                        job_alert=job_alert
                     )
 
                 elif page_category == "navigation_required" or page_category == "job_listings_preview_page":
@@ -425,7 +433,8 @@ class TrackedJobScraper:
                             job_detail_urls=[j.url for j in all_jobs if j.url],
                             message="Reached max number of page navigation and job page not found.",
                             success=False,
-                            total_token=total_token, llm_reasoning=llm_reasoning
+                            total_token=total_token, llm_reasoning=llm_reasoning,
+                            job_alert=job_alert
                         )
 
                     nav_target = result.get("next_action_target", {})
@@ -448,7 +457,8 @@ class TrackedJobScraper:
                                 success=True,
                                 is_linkd_or_indeed_url=True,
                                 llm_reasoning=llm_reasoning,
-                                total_token=total_token
+                                total_token=total_token,
+                                job_alert=job_alert
                             )                    
                     
                         nav_url = TextProcessor.normalize_url(nav_url, page_url)
@@ -466,7 +476,8 @@ class TrackedJobScraper:
                                     job_detail_urls=[j.url for j in all_jobs if j.url],
                                     message="Navigation target already visited.",
                                     success=False,
-                                    total_token=total_token, llm_reasoning=llm_reasoning
+                                    total_token=total_token, llm_reasoning=llm_reasoning,
+                                    job_alert=job_alert
                                 )
 
                             nav_count += 1
@@ -514,7 +525,8 @@ class TrackedJobScraper:
                         job_detail_urls=[j.url for j in all_jobs if j.url],
                         message="No valid navigation target found.",
                         success=False,
-                        total_token=total_token, llm_reasoning=llm_reasoning
+                        total_token=total_token, llm_reasoning=llm_reasoning,
+                        job_alert=job_alert
                     )
 
                 logger.debug(
@@ -538,7 +550,8 @@ class TrackedJobScraper:
                 message="No valid ai content meets",
                 success=False,
                 llm_reasoning=llm_reasoning,
-                total_token=total_token
+                total_token=total_token,
+                job_alert=job_alert
             )
         except Exception as e:
             logger.error(
@@ -554,6 +567,8 @@ class TrackedJobScraper:
                 error=str(e),
                 total_token=total_token,
                 llm_reasoning=llm_reasoning,
+                job_alert=job_alert
+                
             ) 
 
 
@@ -609,7 +624,23 @@ class TrackedJobScraper:
         """Process a single job URL and return standardized result"""
         
         token_usage = 0
-        
+        # EARLY EXIT: Document files are never ATS
+        if self._is_document_url(job_url):
+            self._tracker.mark_visited(job_url)
+            return {
+                "status": "success",
+                "job_url": job_url,
+                "is_ats": False,
+                "is_known_ats": False,
+                "is_external_application": False,
+                "ats_provider": None,
+                "application_type": "document_only",
+                "confidence": "high",
+                "reasoning": "Job URL points to a document file (.pdf/.docx). Document files are not ATS or application systems.",
+                "detection_method": "file_type_rule",
+                "token_usage": 0
+            }
+
         # Initial ATS detection
         ats_info = ATSDetector.detect_ats(job_url, domain)
         logger.debug(
@@ -917,3 +948,7 @@ class TrackedJobScraper:
                 "reasoning": "Error during additional scraping",
                 "token_usage": token_usage
             }
+            
+    def _is_document_url(self, url: str) -> bool:
+        path = urlparse(url.lower()).path
+        return path.endswith((".pdf", ".docx", ".doc"))
