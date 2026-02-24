@@ -5,12 +5,13 @@
 
 from service.url_extractor_engine_service import UrlExtractor
 from service.brower_scraper_service import DOMContentExtractor, ExtractionConfig
-from service.chromium_service import ChromeCDPManager, ChromeConfig
+from service.chromium_service import ChromeCDPManager, CDPConfig
 from service.job_analyzer import JobPageAnalyzer, AnalysisPromptType
 from service.agent_service import JobScraperConfig, URLTracker, TrackedJobScraper, JobEntry, ScrapeResult
 from utils.domain_name_filters import URLFilter
 from utils.ats_detector import  ATSDetector
 from browser_use import Agent, BrowserSession, ChatOpenAI
+from service.create_session import create_session
 from core.config import settings
 import asyncio
 from service.mongdb_service import MongoDBService
@@ -44,10 +45,35 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             scroll_to_load=True,
             wait_seconds=3.0,
         )
-
-        chrome_config = ChromeConfig(
-            port=9222 + agent_id  # IMPORTANT: Use agent_id!
-        )
+        cdp_url = create_session()
+        if not cdp_url:
+            message = "No Browser found on the server"
+            return {
+                    "domain": domain,
+                    "success": False,
+                    "run_status": run_status,
+                    "message": message,
+                    "total_duration_seconds": 0,
+                    "total_urls_processed": 0,
+                    "total_token_usage": 0,
+                    "summary": {
+                        "urls_checked": 0,
+                        "jobs_found": 0,
+                        "successful_scrapes": 0,
+                        "failed_scrapes": 1,
+                        "linkedin_indeed_redirects": 0,
+                        "ats_jobs_found": 0
+                    },
+                    "scrape_results": [],
+                    "error_details": {
+                        "error_type": message,
+                        "error": message,
+                        "status": "error",
+                        "redirected": None
+                    }
+                }
+            
+        chrome_config = CDPConfig(cdp_url=cdp_url)
         
         async with ChromeCDPManager(config=chrome_config) as manager:
             logger.debug("ChromeCDPManager context entered")
@@ -59,13 +85,14 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             tracker = URLTracker()
             url_extractor_page = UrlExtractor(page, extractor)
             
-            browser = BrowserSession(keep_alive=True)
-            await browser.connect(manager.cdp_url)
+            # browser = BrowserSession(keep_alive=True)
+            # await browser.connect(manager.cdp_url)
             
             logger.debug("BrowserSession started", extra={"cdp_url": manager.cdp_url})
             logger.debug("All services initialized")
             
             # [... all the URL discovery and validation code ...]
+            
             
             fallback_urls = await url_extractor_page.discover_job_urls_from_domain(
                 domain=domain,
@@ -77,8 +104,8 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             is_redirected = meta_data.get("redirected", False)
 
             if not fallback_urls.get("success") or is_redirected:
-                if browser:
-                    await browser.stop()
+                # if browser:
+                #     await browser.stop()
                 
                 total_duration = time.time() - start_time
                 
@@ -135,8 +162,8 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             
             if not job_filtered:
                 logger.error("No job URLs found", extra={"domain": domain})
-                if browser:
-                    await browser.stop()
+                # if browser:
+                #     await browser.stop()
                 
                 total_duration = time.time() - start_time
                 return {
@@ -166,7 +193,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             logger.info("Starting job scraping phase", extra={"urls_to_process": len(job_filtered)})
             
             scraper = TrackedJobScraper(
-                browser=browser,
+                page=page,
                 llm=llm,
                 extractor=extractor,
                 analyzer=analyzer,
@@ -297,9 +324,9 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                 
                 if complete == True:
                     break
-            # Clean up browser BEFORE exiting context
-            if browser:
-                await browser.stop()
+            # # Clean up browser BEFORE exiting context
+            # if browser:
+            #     await browser.stop()
 
             # STILL INSIDE THE 'async with' BLOCK
             total_duration = time.time() - start_time
@@ -478,17 +505,17 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
         )
         
         # Clean up browser if it exists
-        if browser:
-            try:
-                await browser.stop()
-            except Exception as cleanup_error:
-                logger.error(
-                    "Error stopping browser during cleanup",
-                    extra={"error": str(cleanup_error)},
-                )
+        # if browser:
+        #     try:
+        #         await browser.stop()
+        #     except Exception as cleanup_error:
+        #         logger.error(
+        #             "Error stopping browser during cleanup",
+        #             extra={"error": str(cleanup_error)},
+        #         )
         
         total_duration = time.time() - start_time
-        
+    
         return {
             "domain": domain,
             "success": False,

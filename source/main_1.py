@@ -287,104 +287,104 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             
             # [... all the URL discovery and validation code ...]
             
-            # fallback_urls = await url_extractor_page.discover_job_urls_from_domain(
-            #     domain=domain,
-            #     try_common_paths=False,
-            #     extract_from_homepage=True,
-            # )
+            fallback_urls = await url_extractor_page.discover_job_urls_from_domain(
+                domain=domain,
+                try_common_paths=False,
+                extract_from_homepage=True,
+            )
             
-            # meta_data = fallback_urls.get("meta_data", {})
-            # is_redirected = meta_data.get("redirected", False)
+            meta_data = fallback_urls.get("meta_data", {})
+            is_redirected = meta_data.get("redirected", False)
 
-            # if not fallback_urls.get("success") or is_redirected:
-            #     if browser:
-            #         await browser.stop()
+            if not fallback_urls.get("success") or is_redirected:
+                if browser:
+                    await browser.stop()
                 
-            #     total_duration = time.time() - start_time
+                total_duration = time.time() - start_time
                 
-            #     if not fallback_urls.get("success"):
-            #         error_type = "domain_access_failed"
-            #         message = "Failed to access domain or load homepage"
-            #         run_status = "Domain Failed"
-            #         error = fallback_urls.get("error", "Unknown error")
-            #         status = fallback_urls.get("status", "")
+                if not fallback_urls.get("success"):
+                    error_type = "domain_access_failed"
+                    message = "Failed to access domain or load homepage"
+                    run_status = "Domain Failed"
+                    error = fallback_urls.get("error", "Unknown error")
+                    status = fallback_urls.get("status", "")
                     
-            #     else:
-            #         error_type = "domain_redirected"
-            #         final_domain = meta_data.get('final_domain', 'unknown')
-            #         message = f"Domain redirected from {meta_data.get('original_domain')} to {final_domain}"
-            #         error = f"Redirect detected: {meta_data.get('original_url')} → {meta_data.get('final_url')}"
-            #         status = "redirected"
-            #         run_status = f"Domain Redirected to {final_domain}"
+                else:
+                    error_type = "domain_redirected"
+                    final_domain = meta_data.get('final_domain', 'unknown')
+                    message = f"Domain redirected from {meta_data.get('original_domain')} to {final_domain}"
+                    error = f"Redirect detected: {meta_data.get('original_url')} → {meta_data.get('final_url')}"
+                    status = "redirected"
+                    run_status = f"Domain Redirected to {final_domain}"
                 
-            #     return {
-            #         "domain": domain,
-            #         "success": False,
-            #         "run_status": run_status,
-            #         "message": message,
-            #         "total_duration_seconds": round(total_duration, 2),
-            #         "total_urls_processed": 0,
-            #         "total_token_usage": 0,
-            #         "summary": {
-            #             "urls_checked": 0,
-            #             "jobs_found": 0,
-            #             "successful_scrapes": 0,
-            #             "failed_scrapes": 1,
-            #             "linkedin_indeed_redirects": 0,
-            #             "ats_jobs_found": 0
-            #         },
-            #         "scrape_results": [],
-            #         "error_details": {
-            #             "error_type": error_type,
-            #             "error": error,
-            #             "status": status,
-            #             "redirected": is_redirected,
-            #             "original_url": meta_data.get("original_url"),
-            #             "final_url": meta_data.get("final_url"),
-            #             "original_domain": meta_data.get("original_domain"),
-            #             "final_domain": meta_data.get("final_domain")
-            #         }
-            #     }
+                return {
+                    "domain": domain,
+                    "success": False,
+                    "run_status": run_status,
+                    "message": message,
+                    "total_duration_seconds": round(total_duration, 2),
+                    "total_urls_processed": 0,
+                    "total_token_usage": 0,
+                    "summary": {
+                        "urls_checked": 0,
+                        "jobs_found": 0,
+                        "successful_scrapes": 0,
+                        "failed_scrapes": 1,
+                        "linkedin_indeed_redirects": 0,
+                        "ats_jobs_found": 0
+                    },
+                    "scrape_results": [],
+                    "error_details": {
+                        "error_type": error_type,
+                        "error": error,
+                        "status": status,
+                        "redirected": is_redirected,
+                        "original_url": meta_data.get("original_url"),
+                        "final_url": meta_data.get("final_url"),
+                        "original_domain": meta_data.get("original_domain"),
+                        "final_domain": meta_data.get("final_domain")
+                    }
+                }
             
-            # logger.info("Starting search and filter phase", extra={"domain": domain})
+            logger.info("Starting search and filter phase", extra={"domain": domain})
 
-            # search_query = f"{domain} jobs"
-            # search_result = await url_extractor_page.search_duckduckgo(search_query, domain)
+            search_query = f"{domain} jobs"
+            search_result = await url_extractor_page.search_duckduckgo(search_query, domain)
             
-            # job_filtered = list(set(search_result.get("result", []) + fallback_urls.get("result", [])))
+            job_filtered = list(set(search_result.get("result", []) + fallback_urls.get("result", [])))
             
-            # if not job_filtered:
-            #     logger.error("No job URLs found", extra={"domain": domain})
-            #     if browser:
-            #         await browser.stop()
+            if not job_filtered:
+                logger.error("No job URLs found", extra={"domain": domain})
+                if browser:
+                    await browser.stop()
                 
-            #     total_duration = time.time() - start_time
-            #     return {
-            #         "domain": domain,
-            #         "success": False,
-            #         "run_status": "No Job Pages Found",
-            #         "message": "Was not able to find job/career page",
-            #         "total_duration_seconds": round(total_duration, 2),
-            #         "total_urls_processed": 0,
-            #         "total_token_usage": 0,
-            #         "summary": {
-            #             "urls_checked": 0,
-            #             "jobs_found": 0,
-            #             "successful_scrapes": 0,
-            #             "failed_scrapes": 1,
-            #             "linkedin_indeed_redirects": 0,
-            #             "ats_jobs_found": 0
-            #         },
-            #         "scrape_results": [],
-            #         "error_details": {
-            #             "error_type": "no_job_urls_found",
-            #             "search_result": search_result.get("status", ""),
-            #             "fallback_result": "No URLs found"
-            #         }
-            #     }
-            # job_filtered = ["https://jobs.youthmusic.org.uk/"]
-            job_filtered = ["https://www.zealcreative.com/careers/"]
-            # job_filtered = ["https://www.zentia.com/en-gb/careers/"]
+                total_duration = time.time() - start_time
+                return {
+                    "domain": domain,
+                    "success": False,
+                    "run_status": "No Job Pages Found",
+                    "message": "Was not able to find job/career page",
+                    "total_duration_seconds": round(total_duration, 2),
+                    "total_urls_processed": 0,
+                    "total_token_usage": 0,
+                    "summary": {
+                        "urls_checked": 0,
+                        "jobs_found": 0,
+                        "successful_scrapes": 0,
+                        "failed_scrapes": 1,
+                        "linkedin_indeed_redirects": 0,
+                        "ats_jobs_found": 0
+                    },
+                    "scrape_results": [],
+                    "error_details": {
+                        "error_type": "no_job_urls_found",
+                        "search_result": search_result.get("status", ""),
+                        "fallback_result": "No URLs found"
+                    }
+                }
+            # # job_filtered = ["https://jobs.youthmusic.org.uk/"]
+            # job_filtered = ["https://www.zealcreative.com/careers/"]
+            # # job_filtered = ["https://www.zentia.com/en-gb/careers/"]
             logger.info("Starting job scraping phase", extra={"urls_to_process": len(job_filtered)})
             
             scraper = TrackedJobScraper(
@@ -818,9 +818,10 @@ if __name__ == "__main__":
     
     # List of URLs/domains to process
     urls_to_process = [
+        "www.ukcybersecuritycouncil.org.uk"
         # "aceandtate.com", # redirected job page 
         # "www.trireme.com" # linkdlin job
-        "www.zentia.com" # indeed job
+        # "www.zentia.com" # indeed job
         # "traffordcentre.co.uk" # linkdin
         # "www.transparency.org.uk"
         # "bunzl-careers.co.uk/"

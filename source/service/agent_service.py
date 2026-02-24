@@ -11,6 +11,7 @@ from urllib.parse import urlparse, urlunparse
 import tldextract
 from urllib.parse import urlparse
 from utils.ats_detector import  ATSDetector
+from playwright.async_api import Page 
 
 # Configure logging
 logger = setup_logger(__name__)
@@ -226,14 +227,15 @@ class URLTracker:
 class TrackedJobScraper:
     def __init__(
         self,
-        browser: BrowserSession,
+        page: Page,
         llm: ChatOpenAI,
         extractor: "DOMContentExtractor",
         analyzer: "JobPageAnalyzer",
         tracker: URLTracker,
         config: Optional["JobScraperConfig"] = None,
     ):
-        self._browser = browser
+        # self._browser = browser
+        self._page = page
         self._llm = llm
         self._extractor = extractor
         self._analyzer = analyzer
@@ -250,7 +252,7 @@ class TrackedJobScraper:
         )
 
     async def _get_page(self):
-        return await self._browser.get_current_page()
+        return self._page
 
     async def _navigate(self, url: str) -> None:
         logger.debug(
@@ -258,7 +260,11 @@ class TrackedJobScraper:
             extra={"url": url},
         )
         page = await self._get_page()
-        await page.goto(url)
+        await page.goto(
+            url,
+            wait_until="domcontentloaded",  # don't wait for all resources
+            timeout=60_000,                 # 60s instead of 30s
+        )
         await asyncio.sleep(self._config.page_load_wait)
         self._tracker.mark_visited(url)
         self._current_visited.append(url)
@@ -444,7 +450,7 @@ class TrackedJobScraper:
                     if nav_url:
                         current_page = await self._get_page()
                         
-                        page_url = await current_page.get_url()
+                        page_url = await current_page.url
                         nav_domain = urlparse(nav_url).netloc.lower()
                 
                     
@@ -492,20 +498,31 @@ class TrackedJobScraper:
                     elif link_text:
                         nav_count += 1
                         page = await self._get_page()
-                        prompt = (
-                            f"Find the clickable element whose visible text most closely matches "
-                            f"'{link_text}' and is used to navigate to the job listings page."
-                        )
-                        logger.debug(
-                            "Searching for navigation element by text",
-                            extra={"link_text": link_text},
-                        )
-                        button = await page.get_element_by_prompt(prompt, llm=self._llm)
+                        
+                        # Try multiple strategies to find the element by text
+                        button = None
+                        
+                        # 1. Exact text match on common clickable elements
+                        for selector in [
+                            f"a:has-text('{link_text}')",
+                            f"button:has-text('{link_text}')",
+                            f"[role='link']:has-text('{link_text}')",
+                            f"[role='button']:has-text('{link_text}')",
+                            f"text='{link_text}'",
+                        ]:
+                            try:
+                                locator = page.locator(selector).first
+                                if await locator.count() > 0 and await locator.is_visible():
+                                    button = locator
+                                    break
+                            except Exception:
+                                continue
+
                         if button:
-                            await button.click("left")
+                            await button.click()
                             await asyncio.sleep(self._config.page_load_wait)
 
-                            current_url = await page.get_url()
+                            current_url = page.url
                             self._tracker.mark_visited(current_url)
                             self._current_visited.append(current_url)
                             logger.info(
@@ -670,8 +687,8 @@ class TrackedJobScraper:
         try:
             # Navigate and check for redirects
             await self._navigate(job_url)
-            page = await self._browser.get_current_page()
-            current_url = await page.get_url()
+            page = self._page
+            current_url = page.url
             
             # CRITICAL: Check if we were redirected
             redirect_info = self._check_redirect(job_url, current_url, domain)
@@ -851,21 +868,30 @@ class TrackedJobScraper:
                     "token_usage": token_usage
                 }
             
-            page = await self._browser.get_current_page()
+            page = self._page
             
             # Navigate to apply URL or click button
             if apply_url:
-                page_url = await page.get_url()
-                filter_domain = self._tracker.extract_domain(page_url)
+                filter_domain = self._tracker.extract_domain(page.url)
                 apply_url = self._tracker.normalize_full_path(apply_url, filter_domain)
                 await self._navigate(apply_url)
             else:
-                prompt = (
-                    f"Find the clickable element whose visible text most closely matches "
-                    f"'{button_text}' and is used to apply for a job."
-                )
-                button = await page.get_element_by_prompt(prompt, llm=self._llm)
-                
+                button = None
+                for selector in [
+                    f"a:has-text('{button_text}')",
+                    f"button:has-text('{button_text}')",
+                    f"[role='link']:has-text('{button_text}')",
+                    f"[role='button']:has-text('{button_text}')",
+                    f"text='{button_text}'",
+                ]:
+                    try:
+                        locator = page.locator(selector).first
+                        if await locator.count() > 0 and await locator.is_visible():
+                            button = locator
+                            break
+                    except Exception:
+                        continue
+
                 if not button:
                     return {
                         "status": "uncertain",
@@ -877,11 +903,11 @@ class TrackedJobScraper:
                         "token_usage": token_usage
                     }
                 
-                await button.click("left")
+                await button.click()
                 await asyncio.sleep(self._config.page_load_wait)
             
             # Check for redirect after clicking/navigating
-            current_url = await page.get_url()
+            current_url = page.url
             redirect_info = self._check_redirect(job_url, current_url, domain)
             
             # Extract new page content
@@ -895,7 +921,6 @@ class TrackedJobScraper:
                 main_domain=domain
             )
             
-            # Track tokens from second analysis
             token_usage += second_analysis.token_usage if hasattr(second_analysis, 'token_usage') else 0
             
             if not second_analysis.success:
@@ -911,7 +936,6 @@ class TrackedJobScraper:
             
             response = second_analysis.response
             
-            # Return with clear confidence
             if response.get("confidence") in ["high", "medium"]:
                 return {
                     "status": "success",
@@ -948,7 +972,8 @@ class TrackedJobScraper:
                 "reasoning": "Error during additional scraping",
                 "token_usage": token_usage
             }
-            
+
     def _is_document_url(self, url: str) -> bool:
         path = urlparse(url.lower()).path
         return path.endswith((".pdf", ".docx", ".doc"))
+
