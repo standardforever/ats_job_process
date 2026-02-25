@@ -595,7 +595,7 @@ class TrackedJobScraper:
         Enhanced to stop on first definitive result (true/false)
         Continue checking if uncertain until we get a definitive answer or exhaust all jobs
         """
-        jobs = ["https://www.uk-med.org/vacancies-2/operations-coordinator-gaza/"]
+
         results = []
         total_tokens = 0
         found_definitive = False
