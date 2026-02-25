@@ -595,6 +595,7 @@ class TrackedJobScraper:
         Enhanced to stop on first definitive result (true/false)
         Continue checking if uncertain until we get a definitive answer or exhaust all jobs
         """
+        jobs = ["https://www.uk-med.org/vacancies-2/operations-coordinator-gaza/"]
         results = []
         total_tokens = 0
         found_definitive = False
@@ -617,6 +618,9 @@ class TrackedJobScraper:
                         "confidence": result.get("confidence")
                     }
                 )
+                print('\n\n\n\n')
+                print(result)
+                print('\n\n\n\n')
                 break
             
             # Continue if uncertain or error - we want to try to get a definitive answer
@@ -867,7 +871,6 @@ class TrackedJobScraper:
                     "requires_manual_review": True,
                     "token_usage": token_usage
                 }
-            
             page = self._page
             
             # Navigate to apply URL or click button

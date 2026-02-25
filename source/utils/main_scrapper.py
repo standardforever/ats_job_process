@@ -223,6 +223,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             start_time = time.time()
             complete = False
             # SCRAPING LOOP MUST BE INSIDE THE 'async with' BLOCK
+            job_filtered = ["https://www.uk-med.org/vacancies-2/"]
             for url in job_filtered:
                 url = tracker.normalize_full_path(url, domain)
 
