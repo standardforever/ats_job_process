@@ -116,8 +116,6 @@ pyee==13.0.0
 Pygments==2.19.2
 PyJWT==2.10.1
 pymongo==4.15.5
-pyobjc-core==12.1
-pyobjc-framework-Cocoa==12.1
 pyotp==2.9.0
 pyparsing==3.2.5
 pypdf==6.4.0

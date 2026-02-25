@@ -1,12 +1,33 @@
+import os
+from urllib.parse import urlparse
+
 import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
 
 
-def _get_active_grid_sessions(grid_url: str) -> list:
+def _normalize_grid_url(raw_url: str) -> tuple[str, str, str]:
+    url = (raw_url or "").strip()
+    if not url:
+        url = "http://127.0.0.1:4445/wd/hub"
+    if not url.startswith(("http://", "https://")):
+        url = f"http://{url}"
+
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        raise ValueError(f"Invalid Selenium URL: {raw_url}")
+
+    executor_url = url
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+    cdp_host = parsed.netloc
+    return executor_url, base_url, f"{ws_scheme}://{cdp_host}"
+
+
+def _get_active_grid_sessions(base_url: str) -> list:
     try:
-        response = requests.get(f"{grid_url}/status", timeout=5)
+        response = requests.get(f"{base_url}/status", timeout=5)
         if response.status_code != 200:
             return []
 
@@ -25,33 +46,40 @@ def _get_active_grid_sessions(grid_url: str) -> list:
         return []
 
 
-def _kill_session(session_id: str, grid_url: str) -> None:
+def _kill_session(session_id: str, base_url: str) -> None:
     try:
-        requests.delete(f"{grid_url}/session/{session_id}", timeout=5)
+        requests.delete(f"{base_url}/session/{session_id}", timeout=5)
         print(f"[create_session] 🔪 Killed session: {session_id}")
     except Exception as e:
         print(f"[create_session] ⚠️ Could not kill session {session_id}: {e}")
 
 
-def create_session(grid_url: str = "http://localhost:4444") -> str | None:
+def create_session(grid_url: str | None = None) -> str | None:
     """
-    Connects to the Selenium Grid. If an active session already exists,
-    reuses it. Otherwise creates a fresh one.
+    Connects to Selenium Grid. Reuses existing active session when possible,
+    otherwise creates a new one and returns its CDP endpoint.
 
-    Args:
-        grid_url: Selenium Grid URL (e.g. "http://localhost:4444")
-
-    Returns:
-        cdp_url (str) on success, None on failure
+    Priority for grid URL:
+      1) function arg
+      2) SELENIUM_REMOTE_URL env var
+      3) default http://127.0.0.1:4445/wd/hub
     """
-    print("[create_session] Connecting to Grid...")
+    raw_grid = grid_url or os.getenv("SELENIUM_REMOTE_URL") or "http://127.0.0.1:4445/wd/hub"
 
-    existing_sessions = _get_active_grid_sessions(grid_url)
+    try:
+        executor_url, base_url, cdp_base = _normalize_grid_url(raw_grid)
+    except Exception as e:
+        print(f"[create_session] ❌ Invalid grid URL {raw_grid}: {e}")
+        return None
+
+    print(f"[create_session] Connecting to Grid: {base_url}")
+
+    existing_sessions = _get_active_grid_sessions(base_url)
 
     # Reuse the first active session if one exists
     if existing_sessions:
         session_id = existing_sessions[0]
-        cdp_url = f"ws://localhost:4444/session/{session_id}/se/cdp"
+        cdp_url = f"{cdp_base}/session/{session_id}/se/cdp"
         print(f"[create_session] ♻️  Reusing existing session: {session_id}")
         print(f"[create_session] 🔗 CDP URL: {cdp_url}")
         return cdp_url
@@ -59,11 +87,11 @@ def create_session(grid_url: str = "http://localhost:4444") -> str | None:
     # No existing session — create a fresh one
     try:
         driver = webdriver.Remote(
-            command_executor=grid_url,
+            command_executor=executor_url,
             options=Options(),
         )
 
-        cdp_url = f"ws://localhost:4444/session/{driver.session_id}/se/cdp"
+        cdp_url = f"{cdp_base}/session/{driver.session_id}/se/cdp"
         print(f"[create_session] ✅ Session created: {driver.session_id}")
         print(f"[create_session] 🔗 CDP URL: {cdp_url}")
         return cdp_url

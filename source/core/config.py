@@ -5,6 +5,8 @@ from typing import Optional
 
 class Setttings(BaseSettings):
     OPENAI_API_KEY: str
+    SELENIUM_REMOTE_URL: str = "http://127.0.0.1:4445/wd/hub"
+    BROWSER_TAB_POOL_SIZE: int = 3
 
     # Vector store configuration
     USE_QDRANT: bool = True
@@ -15,15 +17,15 @@ class Setttings(BaseSettings):
     MONGO_URI: str = "mongodb://127.0.0.1:27017"
     DATABASE_NAME: str = "job_scraper"
 
-    
+
     # Model configuration
     LLM_MODEL: str =  "gpt-4o-mini"
     EMBEDDING_MODEL: str = "text-embedding-3-large"
-    
+
     # Chunking configuration
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int =  200
-    
+
     # PDF processing configuration
     ENABLE_OCR: bool = True
     ENABLE_TABLES: bool = True
