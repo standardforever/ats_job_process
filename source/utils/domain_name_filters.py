@@ -179,3 +179,66 @@ class URLFilter:
         )
         return result
 
+
+
+    @classmethod
+    def is_recruitment_domain_shift(
+        cls,
+        original_domain: str,
+        new_url: str,
+    ) -> tuple[bool, str]:
+        """
+        Check if a domain change qualifies as Category B:
+        Recruitment Related Domain Shift.
+
+        Rule: If the original company name appears anywhere in the new domain
+        (subdomain, root, or ATS-hosted), treat it as a recruitment shift.
+
+        Returns:
+            tuple[bool, str]: (is_recruitment_shift, reason)
+                - True  → Continue processing (Category B)
+                - False → Company name absent, likely corporate replacement (Category A)
+        """
+        try:
+            original_domain = original_domain.replace("www.", "").lower().strip("/")
+            parsed = urlparse(new_url if "://" in new_url else f"https://{new_url}")
+            new_netloc = parsed.netloc.replace("www.", "").lower()
+
+            # Extract company root name from original domain (strip TLD)
+            # e.g. "abc" from "abc.com" or "abc.co.uk"
+            company_name = original_domain.split(".")[0]
+
+            logger.debug(
+                "Checking recruitment domain shift",
+                extra={
+                    "original_domain": original_domain,
+                    "new_netloc": new_netloc,
+                    "company_name": company_name,
+                },
+            )
+
+            # Core rule: company name must appear somewhere in the new domain
+            if company_name in new_netloc:
+                reason = (
+                    f"Company name '{company_name}' found in new domain '{new_netloc}' "
+                    f"— treating as recruitment-related domain shift"
+                )
+                logger.info(reason)
+                return True, reason
+
+            reason = (
+                f"Company name '{company_name}' not found in new domain '{new_netloc}' "
+                f"— likely corporate replacement (Category A)"
+            )
+            logger.debug(reason)
+            return False, reason
+
+        except Exception as e:
+            logger.error(
+                "Error checking recruitment domain shift",
+                extra={"original_domain": original_domain, "new_url": new_url, "error": str(e)},
+            )
+            return False, f"Error during check: {str(e)}"
+        
+        
+        

@@ -70,6 +70,7 @@ class UrlExtractor:
         response_value["result"] = job_filtered
         response_value["domain"] = domain
         response_value["meta_data"]["job_urls"] = len(job_filtered)
+        response_value["meta_data"]["all_urls"] = all_urls
         return response_value
 
     # -------------------------------------------------------------------------
@@ -172,6 +173,7 @@ class UrlExtractor:
                 "job_urls": len(job_filtered),
                 "engine_used": result_state.get("current_step", "unknown"),
                 "total_raw_results": len(raw_urls),
+                "all_urls": raw_urls
             },
         }
 

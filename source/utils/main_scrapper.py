@@ -25,7 +25,7 @@ logger = setup_logger(__name__)
 
 
 
-async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: int = 0) -> Dict[str, Any]:
+async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: int = 0) -> Dict[str, Any]:
     browser = None  # Initialize at top
     manager = None
     run_status = None
@@ -89,7 +89,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             # await browser.connect(manager.cdp_url)
             
             logger.debug("BrowserSession started", extra={"cdp_url": manager.cdp_url})
-            logger.debug("All services initialized")
+            logger.info("All services initialized")
             
             # [... all the URL discovery and validation code ...]
             
@@ -102,6 +102,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
             
             meta_data = fallback_urls.get("meta_data", {})
             is_redirected = meta_data.get("redirected", False)
+            all_urls = meta_data.get("all_urls", [])
 
             if not fallback_urls.get("success") or is_redirected:
                 # if browser:
@@ -157,9 +158,11 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
 
             search_query = f"{domain} jobs"
             search_result = await url_extractor_page.search_duckduckgo(search_query, domain)
+            all_urls = all_urls + search_result.get("meta_data", {}).get("all_urls", [])
+
             
             job_filtered = list(set(search_result.get("result", []) + fallback_urls.get("result", [])))
-            
+        
             if not job_filtered:
                 logger.error("No job URLs found", extra={"domain": domain})
                 # if browser:
@@ -444,6 +447,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-4o-mini", agent_id: i
                 "total_urls_processed": len(job_filtered),
                 "total_token_usage": total_tokens,
                 "summary": {
+                    "job_filtered": job_filtered,
                     "urls_checked": len(job_filtered),
                     "jobs_found": stats["jobs_found"],
                     "successful_scrapes": stats["successful_scrapes"],
