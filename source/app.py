@@ -28,7 +28,8 @@ from utils.convert_json_to_csv import read_all_jobs_from_files, generate_csv_fro
 app = FastAPI(
     title="Job Scraper API",
     description="Automated job scraping with parallel agents, CSV export, and task management",
-    version="2.0"
+    version="2.0",
+    root_path="/ats",
 )
 
 # Task storage and tracking
@@ -861,7 +862,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
-        port=8001,
+        port=8010,
         reload=True,
         log_level="info"
     )
