@@ -5,6 +5,7 @@ import requests
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.remote.webdriver import WebDriver
 
 
 def _normalize_grid_url(raw_url: str) -> tuple[str, str, str]:
@@ -88,8 +89,9 @@ def create_session(grid_url: str | None = None) -> str | None:
     try:
         driver = webdriver.Remote(
             command_executor=executor_url,
-            options=Options(),
+            options=_build_stealth_options(),
         )
+        patch_webdriver_flag(driver)
 
         cdp_url = f"{cdp_base}/session/{driver.session_id}/se/cdp"
         print(f"[create_session] ✅ Session created: {driver.session_id}")
@@ -103,3 +105,36 @@ def create_session(grid_url: str | None = None) -> str | None:
     except Exception as e:
         print(f"[create_session] ❌ Unexpected error: {e}")
         return None
+    
+
+def _build_stealth_options() -> Options:
+    options = Options()
+    
+    # Remove automation flags
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    
+    # Disable infobars
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    
+    # Optional but helps blend in
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    )
+    
+    return options
+
+
+def patch_webdriver_flag(driver: WebDriver) -> None:
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """
+    })
