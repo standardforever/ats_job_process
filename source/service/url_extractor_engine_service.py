@@ -267,3 +267,115 @@ class UrlExtractor:
                 "error": str(e),
                 "success": False,
             }
+            
+            
+    
+    async def _extract_career_urls_from_page(self, base_domain: str) -> dict:
+        """
+        Extracts URLs that are likely career/jobs pages based on:
+        1. The link text contains career-related keywords
+        2. The URL itself contains career-related path keywords
+
+        Only returns URLs whose domain differs from base_domain.
+        """
+        logger.debug(
+            "Extracting career URLs from current page",
+            extra={"base_domain": base_domain}
+        )
+        try:
+            raw = await self._page.evaluate(
+                """
+                () => {
+                    const CAREER_TEXT_PATTERNS = [
+                        /\\bcareers?\\b/i,
+                        /\\bjobs?\\b/i,
+                        /\\bwork with us\\b/i,
+                        /\\bjoin us\\b/i,
+                        /\\bjoin our team\\b/i,
+                        /\\bwe('re| are) hiring\\b/i,
+                        /\\bopen (roles?|positions?|vacancies)\\b/i,
+                        /\\bopportunities\\b/i,
+                        /\\bvacancies\\b/i,
+                        /\\bemployment\\b/i,
+                    ];
+
+                    const CAREER_URL_PATTERNS = [
+                        /\\/careers?(\\/|$|\\?)/i,
+                        /\\/jobs?(\\/|$|\\?)/i,
+                        /\\/vacancies(\\/|$|\\?)/i,
+                        /\\/opportunities(\\/|$|\\?)/i,
+                        /\\/work-with-us(\\/|$|\\?)/i,
+                        /\\/join-us(\\/|$|\\?)/i,
+                        /\\/employment(\\/|$|\\?)/i,
+                        /\\/hiring(\\/|$|\\?)/i,
+                    ];
+
+                    const results = [];
+                    const seen = new Set();
+
+                    document.querySelectorAll('a[href]').forEach(link => {
+                        const href = link.href;
+                        if (!href || !href.startsWith('http') || seen.has(href)) return;
+
+                        const linkText = (link.innerText || link.textContent || '').trim();
+                        const matchedByText = CAREER_TEXT_PATTERNS.some(p => p.test(linkText));
+                        const matchedByUrl  = CAREER_URL_PATTERNS.some(p => p.test(href));
+
+                        if (matchedByText || matchedByUrl) {
+                            seen.add(href);
+                            results.push({
+                                url: href,
+                                link_text: linkText,
+                                matched_by: matchedByText && matchedByUrl
+                                    ? 'both'
+                                    : matchedByText ? 'text' : 'url',
+                            });
+                        }
+                    });
+
+                    return results;
+                }
+                """
+            )
+
+            # Filter out any URL whose domain matches base_domain
+            base_ext = tldextract.extract(base_domain)
+            base_root = f"{base_ext.domain}.{base_ext.suffix}".lower()
+
+            external_career_urls = []
+            for item in (raw or []):
+                href_ext = tldextract.extract(item["url"])
+                href_root = f"{href_ext.domain}.{href_ext.suffix}".lower()
+                if href_root != base_root:
+                    external_career_urls.append(item)
+
+            logger.info(
+                "Career URL extraction completed",
+                extra={
+                    "base_domain": base_domain,
+                    "total_matched": len(raw or []),
+                    "external_only": len(external_career_urls),
+                },
+            )
+
+            return {
+                "success": True,
+                "result": external_career_urls,
+                "meta_data": {
+                    "base_domain": base_domain,
+                    "total_matched": len(raw or []),
+                    "external_career_urls": len(external_career_urls),
+                },
+            }
+
+        except Exception as e:
+            logger.warning(
+                "Failed to extract career URLs from page",
+                extra={"error": str(e)}
+            )
+            return {
+                "success": False,
+                "error": str(e),
+                "status": "Failed to extract career URLs from page",
+                "result": [],
+            }

@@ -95,6 +95,21 @@ JOB ALERT DETECTION RULE:
 - Job alert pages are NOT job listings and do NOT count as job postings.
 
 
+PAGE ACCESS STATUS RULE:
+- Evaluate whether the page was successfully accessible and set page_access_status accordingly:
+  - "accessible": Page loaded normally with readable content
+  - "bot_detected": Page shows CAPTCHA, "verify you are human", Cloudflare challenge, 
+    "access denied", or any anti-bot/anti-scraping wall
+  - "login_required": Page requires authentication or account login to view content
+  - "not_found": Page returned a 404 or "page not found" message
+  - "empty_or_blank": Page loaded but has no meaningful content (blank, only nav/footer)
+  - "error": Page shows a generic server error (500, 503, maintenance page, etc.)
+- Set page_access_issue_detail to a short description of the specific signal that led to
+  the status (e.g. "Cloudflare CAPTCHA detected", "Login wall present", "404 message found").
+  Set to null if page_access_status is "accessible".
+- If page_access_status is NOT "accessible", still attempt to classify page_category 
+  based on whatever content is visible, but treat it with lower confidence.
+
 RESPONSE FORMAT:
 - Return ONLY valid JSON
 - Do NOT wrap in markdown code blocks (no ```json or ```)
@@ -111,8 +126,9 @@ RESPONSE SCHEMA:
     "reasoning": string,  // DETAILED explanation of your decision
     "domain_name": "<website main domain>",
     "url": "<main url>",
-    "job_alert": boolean | None
-    
+    "job_alert": boolean | None,
+    "page_access_status": "accessible" | "bot_detected" | "login_required" | "not_found" | "empty_or_blank" | "error",
+    "page_access_issue_detail": "<short description of access issue or null>",
 
     "next_action_target": {{
         "url": "<URL or null>",
@@ -263,6 +279,23 @@ comeet.com, jazz.co, dover.com, rippling.com, catsone.com
 
 ---
 
+PAGE ACCESS STATUS RULE:
+- Evaluate whether the page was successfully accessible and set page_access_status accordingly:
+  - "accessible": Page loaded normally with readable content
+  - "bot_detected": Page shows CAPTCHA, "verify you are human", Cloudflare challenge, 
+    "access denied", or any anti-bot/anti-scraping wall
+  - "login_required": Page requires authentication or account login to view content
+  - "not_found": Page returned a 404 or "page not found" message
+  - "empty_or_blank": Page loaded but has no meaningful content (blank, only nav/footer)
+  - "error": Page shows a generic server error (500, 503, maintenance page, etc.)
+- Set page_access_issue_detail to a short description of the specific signal that led to
+  the status (e.g. "Cloudflare CAPTCHA detected", "Login wall present", "404 message found").
+  Set to null if page_access_status is "accessible".
+- If page_access_status is NOT "accessible", still attempt to classify page_category 
+  based on whatever content is visible, but treat it with lower confidence.
+  
+---
+
 ## APPLICATION TYPE CLASSIFICATION
 Choose ONE:
 - **external_ats** — cross-domain application flow (any vendor or non-vendor external domain)
@@ -297,7 +330,10 @@ Choose ONE:
   "requires_scraping": boolean,
   "indicators_found": list[string],
   "page_validity_issues": list[string] | null,
-  "additional_notes": string | null
+  "additional_notes": string | null,
+  "page_access_status": "accessible" | "bot_detected" | "login_required" | "not_found" | "empty_or_blank" | "error",
+   "page_access_issue_detail": "<short description of access issue or null>",
+
 }}
 
 ---

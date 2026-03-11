@@ -94,13 +94,24 @@ def flatten_job_record(job_record: dict) -> List[dict]:
     
     # Summary stats
     summary = job_record.get('summary', {})
+    # base_data.update({
+    #     # 'urls_checked': summary.get('urls_checked', 0),
+    #     'jobs_found': summary.get('jobs_found', 0),
+    #     # 'successful_scrapes': summary.get('successful_scrapes', 0),
+    #     # 'failed_scrapes': summary.get('failed_scrapes', 0),
+    #     'linkedin_indeed_redirects': summary.get('linkedin_indeed_redirects', 0),
+    #     # 'ats_jobs_found': summary.get('ats_jobs_found', 0),
+    # })
+    
+    non_domain_data = summary.get('non_domain_careers_url', {})
+    non_domain_results = non_domain_data.get('result', []) if isinstance(non_domain_data, dict) else []
+    non_domain_urls = ', '.join([r['url'] for r in non_domain_results if r.get('url')])
+    print(non_domain_urls)
+
     base_data.update({
-        # 'urls_checked': summary.get('urls_checked', 0),
         'jobs_found': summary.get('jobs_found', 0),
-        # 'successful_scrapes': summary.get('successful_scrapes', 0),
-        # 'failed_scrapes': summary.get('failed_scrapes', 0),
         'linkedin_indeed_redirects': summary.get('linkedin_indeed_redirects', 0),
-        # 'ats_jobs_found': summary.get('ats_jobs_found', 0),
+        'non_domain_career_urls': non_domain_urls,  # NEW FIELD
     })
     
     ats_detection = job_record.get("ats_detection") or {}

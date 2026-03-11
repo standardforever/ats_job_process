@@ -100,6 +100,8 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 extract_from_homepage=True,
             )
             
+            non_domain_careers_url= await url_extractor_page._extract_career_urls_from_page(domain)
+            
             meta_data = fallback_urls.get("meta_data", {})
             is_redirected = meta_data.get("redirected", False)
             all_urls = meta_data.get("all_urls", [])
@@ -107,7 +109,6 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             if not fallback_urls.get("success") or is_redirected:
                 # if browser:
                 #     await browser.stop()
-                
                 total_duration = time.time() - start_time
                 
                 if not fallback_urls.get("success"):
@@ -134,6 +135,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     "total_urls_processed": 0,
                     "total_token_usage": 0,
                     "summary": {
+                        "non_domain_careers_url": non_domain_careers_url,
                         "urls_checked": 0,
                         "jobs_found": 0,
                         "successful_scrapes": 0,
@@ -172,12 +174,13 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 return {
                     "domain": domain,
                     "success": False,
-                    "run_status": "No Job Pages Found",
+                    "run_status": "No career/job page found",
                     "message": "Was not able to find job/career page",
                     "total_duration_seconds": round(total_duration, 2),
                     "total_urls_processed": 0,
                     "total_token_usage": 0,
                     "summary": {
+                        "non_domain_careers_url": non_domain_careers_url,
                         "urls_checked": 0,
                         "jobs_found": 0,
                         "successful_scrapes": 0,
@@ -214,6 +217,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 "failed_scrapes": 0,
                 "linkedin_indeed_redirects": 0,
                 "ats_jobs_found": 0,
+                "access_blocked_scrapes": 0,
                 "ats_results": {
                     "ats_true": [],      # Jobs confirmed as ATS
                     "ats_false": [],     # Jobs confirmed as NOT ATS
@@ -250,6 +254,8 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     "status": "success" if result.success else ("error" if result.error else "failed"),
                     "scrape_duration_seconds": round(scrape_duration, 2),
                     "result_type": None,
+                    "page_access_status": result.page_access_status,
+                    "page_access_issue_detail": result.page_access_issue_detail,
                     "jobs": {
                         "count": len(result.job_detail_urls),
                         "job_urls": result.job_detail_urls
@@ -264,8 +270,11 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     },
                     "error": result.error
                 }
-                
-                if result.is_linkd_or_indeed_url:
+                if result.page_access_status in ("bot_detected", "login_required"):
+                    scrape_result["result_type"] = "access_blocked"
+                    stats["access_blocked_scrapes"] += 1
+                    
+                elif result.is_linkd_or_indeed_url:
                     scrape_result["result_type"] = "linkedin_indeed_redirect"
                     stats["linkedin_indeed_redirects"] += 1
                     
@@ -380,6 +389,21 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             # Determine run_status based on results
             if stats["linkedin_indeed_redirects"] > 0:
                 run_status = "LinkedIn/Indeed Redirect"
+            elif (
+                stats["access_blocked_scrapes"] > 0
+                and stats["access_blocked_scrapes"] == len(job_filtered)
+            ):
+                # Determine the specific reason from the last/first blocked result
+                blocked_statuses = [
+                    r["page_access_status"] for r in scrape_results
+                    if r["page_access_status"] in ("bot_detected", "login_required")
+                ]
+                if "bot_detected" in blocked_statuses and "login_required" in blocked_statuses:
+                    run_status = "Access Blocked - Bot Detected / Login Required"
+                elif "bot_detected" in blocked_statuses:
+                    run_status = "Access Blocked - Bot Detected"
+                else:
+                    run_status = "Access Blocked - Login Required"
             elif priority_ats_detection is None:
                 run_status = "No Jobs Found"
             elif priority_ats_detection["ats_status"] == "true":
@@ -447,6 +471,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 "total_urls_processed": len(job_filtered),
                 "total_token_usage": total_tokens,
                 "summary": {
+                    "non_domain_careers_url": non_domain_careers_url,
                     "job_filtered": job_filtered,
                     "urls_checked": len(job_filtered),
                     "jobs_found": stats["jobs_found"],

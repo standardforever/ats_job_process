@@ -42,6 +42,8 @@ class ScrapeResult:
     is_linkd_or_indeed_url: bool = False
     ats_checked: dict = field(default_factory=dict)
     job_alert: bool = False
+    page_access_issue_detail: Optional[str] = None
+    page_access_status: Optional[str] = None
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -329,6 +331,8 @@ class TrackedJobScraper:
                 total_token += analysis.token_usage
                 result = analysis.response
                 job_alert = result.get("job_alert")
+                page_access_status = result.get("page_access_status")
+                page_access_issue_detail = result.get("page_access_issue_detail")
                 page_category = result.get("page_category", "not_job_related")
                 logger.debug(
                     "Analysis result",
@@ -374,7 +378,10 @@ class TrackedJobScraper:
                         job_detail_urls=[j.url for j in all_jobs if j.url],
                         success=True,
                         total_token=total_token, llm_reasoning=llm_reasoning,
-                        job_alert=job_alert
+                        job_alert=job_alert,
+                        page_access_issue_detail=page_access_issue_detail,
+                        page_access_status=page_access_status
+                        
                     )
                 
                 elif page_category == "jobs_listed":
@@ -403,7 +410,9 @@ class TrackedJobScraper:
                         job_detail_urls=[j.url for j in all_jobs if j.url],
                         success=True,
                         total_token=total_token, llm_reasoning=llm_reasoning,
-                        job_alert=job_alert
+                        job_alert=job_alert,
+                        page_access_issue_detail=page_access_issue_detail,
+                        page_access_status=page_access_status
                     )
 
                 elif page_category == "navigation_required" or page_category == "job_listings_preview_page":
@@ -440,7 +449,9 @@ class TrackedJobScraper:
                             message="Reached max number of page navigation and job page not found.",
                             success=False,
                             total_token=total_token, llm_reasoning=llm_reasoning,
-                            job_alert=job_alert
+                            job_alert=job_alert,
+                            page_access_issue_detail=page_access_issue_detail,
+                            page_access_status=page_access_status
                         )
 
                     nav_target = result.get("next_action_target", {})
@@ -450,7 +461,7 @@ class TrackedJobScraper:
                     if nav_url:
                         current_page = await self._get_page()
                         
-                        page_url = await current_page.url
+                        page_url = current_page.url
                         nav_domain = urlparse(nav_url).netloc.lower()
                 
                     
@@ -464,7 +475,9 @@ class TrackedJobScraper:
                                 is_linkd_or_indeed_url=True,
                                 llm_reasoning=llm_reasoning,
                                 total_token=total_token,
-                                job_alert=job_alert
+                                job_alert=job_alert,
+                                page_access_issue_detail=page_access_issue_detail,
+                                page_access_status=page_access_status
                             )                    
                     
                         nav_url = TextProcessor.normalize_url(nav_url, page_url)
@@ -483,7 +496,9 @@ class TrackedJobScraper:
                                     message="Navigation target already visited.",
                                     success=False,
                                     total_token=total_token, llm_reasoning=llm_reasoning,
-                                    job_alert=job_alert
+                                    job_alert=job_alert,
+                                    page_access_issue_detail=page_access_issue_detail,
+                                    page_access_status=page_access_status
                                 )
 
                             nav_count += 1
@@ -543,7 +558,9 @@ class TrackedJobScraper:
                         message="No valid navigation target found.",
                         success=False,
                         total_token=total_token, llm_reasoning=llm_reasoning,
-                        job_alert=job_alert
+                        job_alert=job_alert,
+                        page_access_issue_detail=page_access_issue_detail,
+                        page_access_status=page_access_status
                     )
 
                 logger.debug(
@@ -568,7 +585,9 @@ class TrackedJobScraper:
                 success=False,
                 llm_reasoning=llm_reasoning,
                 total_token=total_token,
-                job_alert=job_alert
+                job_alert=job_alert,
+                page_access_issue_detail=page_access_issue_detail,
+                page_access_status=page_access_status
             )
         except Exception as e:
             logger.error(
@@ -584,7 +603,9 @@ class TrackedJobScraper:
                 error=str(e),
                 total_token=total_token,
                 llm_reasoning=llm_reasoning,
-                job_alert=job_alert
+                job_alert=job_alert,
+                page_access_issue_detail=page_access_issue_detail,
+                page_access_status=page_access_status
                 
             ) 
 
@@ -618,9 +639,6 @@ class TrackedJobScraper:
                         "confidence": result.get("confidence")
                     }
                 )
-                print('\n\n\n\n')
-                print(result)
-                print('\n\n\n\n')
                 break
             
             # Continue if uncertain or error - we want to try to get a definitive answer

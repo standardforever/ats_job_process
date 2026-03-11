@@ -243,6 +243,12 @@ def flatten_job_record(job_record: dict) -> List[dict]:
     """
     summary = job_record.get("summary", {})
     ats_detection = job_record.get("ats_detection") or {}
+    
+    # Extract non-domain career URLs as comma-separated string
+    non_domain_data = summary.get('non_domain_careers_url', {})
+    non_domain_results = non_domain_data.get('result', []) if isinstance(non_domain_data, dict) else []
+    non_domain_urls = ', '.join([r['url'] for r in non_domain_results if r.get('url')])
+
 
     # Resolve career_url using tiered logic
     career_url = extract_career_url(job_record)
@@ -258,6 +264,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
         # Summary
         "jobs_found": summary.get("jobs_found", 0),
         "linkedin_indeed_redirects": summary.get("linkedin_indeed_redirects", 0),
+        "non_domain_career_urls": non_domain_urls,  # ← ADD THIS
         # ATS detection
         "ats_status": ats_detection.get("ats_status"),
         "job_url": ats_detection.get("job_url"),
@@ -280,7 +287,7 @@ def flatten_job_record(job_record: dict) -> List[dict]:
 # Column order — career_url placed right after filter_url for readability
 COLUMN_ORDER = [
     "task_id", "saved_at", "domain", "run_status",
-    "jobs_found", "linkedin_indeed_redirects",
+    "jobs_found", "linkedin_indeed_redirects", "non_domain_career_urls",
     "ats_status", "ats_provider", "confidence", "detection_method", "reasoning",
     "job_url", "filter_url", "career_url",
     "message", "total_duration_seconds", "total_token_usage",
