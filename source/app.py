@@ -20,6 +20,7 @@ from core.config import settings
 from utils.main_scrapper import main_scrapper
 from utils.file_storage import JobFileManager, TaskStorage
 from utils.convert_json_to_csv import read_all_jobs_from_files, generate_csv_from_jobs
+from api.v1.routes.domain_list_router import router as domain_list_router
 
 # ============================================================================
 # APP INITIALIZATION
@@ -32,6 +33,7 @@ app = FastAPI(
     root_path="/ats",
 )
 
+app.include_router(domain_list_router)
 # Task storage and tracking
 tasks_db = TaskStorage()
 running_agent_tasks: Dict[str, List[asyncio.Task]] = {}

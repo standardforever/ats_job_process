@@ -16,13 +16,124 @@ from core.config import settings
 import asyncio
 from service.mongdb_service import MongoDBService
 from utils.file_storage import JobFileManager
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from utils.logging import setup_logger
+import json
+from functools import lru_cache
+from pathlib import Path
+import tldextract
 import time
+from urllib.parse import urlparse
+
 
 # Configure logging
 logger = setup_logger(__name__)
+TLD_EXTRACTOR = tldextract.TLDExtract(suffix_list_urls=None)
 
+
+
+
+@lru_cache(maxsize=1)
+def _load_ats_lists():
+    """Load and cache ats.json and non_ats.json provider lists."""
+    ats_file = Path(__file__).resolve().parents[1] / "domain_lists" / "ats.json"
+    non_ats_file = Path(__file__).resolve().parents[1] / "domain_lists" / "non_ats.json"
+
+    def _load(path):
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            # Support both list and dict formats
+            items = data if isinstance(data, list) else list(data.keys())
+            return {str(item).lower() for item in items}
+        except (FileNotFoundError, json.JSONDecodeError):
+            return set()
+
+    return _load(ats_file), _load(non_ats_file)
+
+
+def _normalize_provider(value: str) -> Optional[str]:
+    """
+    Safely extract the bare domain from an ATS provider string.
+    Returns None if the value can't be parsed — no exceptions raised.
+    
+    Examples:
+      "Greenhouse"              → "greenhouse.io"  (if in list as such)
+      "app.greenhouse.io"       → "greenhouse.io"
+      "https://lever.co/apply"  → "lever.co"
+      "Workday"                 → "workday.com"    (if stored that way)
+    """
+    if not value:
+        return None
+
+    raw = value.strip().lower()
+    candidate = raw if "://" in raw else f"https://{raw}"
+
+    try:
+        parsed = urlparse(candidate)
+        hostname = (parsed.hostname or parsed.path or raw).strip().lower()
+        hostname = hostname.split("/")[0].split("@")[-1].split(":")[0]
+
+        if not hostname:
+            return raw  # return as-is, best effort
+
+        extracted = TLD_EXTRACTOR(hostname)
+        if extracted.domain and extracted.suffix:
+            return f"{extracted.domain}.{extracted.suffix}"
+
+        # Fallback: strip www. and return if it looks like a domain
+        fallback = hostname.removeprefix("www.")
+        if "." in fallback:
+            return fallback
+
+        # Plain name like "Greenhouse" with no TLD — return as-is for list matching
+        return raw
+
+    except Exception:
+        return raw
+
+def reconfirm_ats_result(ats_result: dict) -> dict:
+    """
+    Reconfirm ATS result against known provider lists.
+
+    Rules:
+    - is_ats=True, no provider       → no adjustment
+    - provider in non_ats.json       → override to non-ATS (even if LLM said ATS)
+    - provider in ats.json           → confirm as ATS
+    - provider exists, not in either → unknown_ats (is_ats stays True, flagged unknown)
+    - is_ats=False, no provider      → no adjustment
+    """
+
+    result = ats_result.copy()
+    is_ats = result.get("is_ats")
+    provider = result.get("ats_provider")
+
+    # No provider → no adjustment
+    if not provider:
+        return result
+
+    ats_set, non_ats_set = _load_ats_lists()
+
+    # ── Clean provider before lookup ────────────────────────────────────────
+    normalized_provider = _normalize_provider(provider)
+    if not normalized_provider:
+        return result
+
+    provider_lower = normalized_provider.lower()
+
+    if provider_lower in non_ats_set:
+        result["is_ats"] = False
+        result["_reconfirmed"] = "overridden_to_non_ats"
+
+    elif provider_lower in ats_set:
+        result["is_ats"] = True
+        result["_reconfirmed"] = "confirmed_ats"
+
+    else:
+        result["_reconfirmed"] = "unknown_ats"
+        result["_unknown_ats"] = True
+
+    return result
 
 
 async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: int = 0) -> Dict[str, Any]:
@@ -107,8 +218,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             all_urls = meta_data.get("all_urls", [])
 
             if not fallback_urls.get("success") or is_redirected:
-                # if browser:
-                #     await browser.stop()
+           
                 total_duration = time.time() - start_time
                 
                 if not fallback_urls.get("success"):
@@ -167,9 +277,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
         
             if not job_filtered:
                 logger.error("No job URLs found", extra={"domain": domain})
-                # if browser:
-                #     await browser.stop()
-                
+               
                 total_duration = time.time() - start_time
                 return {
                     "domain": domain,
@@ -221,7 +329,8 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 "ats_results": {
                     "ats_true": [],      # Jobs confirmed as ATS
                     "ats_false": [],     # Jobs confirmed as NOT ATS
-                    "ats_uncertain": []  # Jobs we couldn't determine
+                    "ats_uncertain": [],  # Jobs we couldn't determine
+                    "ats_unknown": []
                 }
             }
             
@@ -286,41 +395,48 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     scrape_result["result_type"] = "jobs_found"
                     stats["successful_scrapes"] += 1
                     stats["jobs_found"] += len(result.job_detail_urls)
-                    
+
                     ats_start_time = time.time()
                     ats_checked = await scraper.ats_checks(domain=domain, jobs=result.job_detail_urls)
                     ats_duration = time.time() - ats_start_time
-                    
+
                     total_tokens += ats_checked.get("total_tokens", 0)
-                    
+
                     scrape_result["ats_check"] = {
                         "duration_seconds": round(ats_duration, 2),
                         "total_tokens": ats_checked.get("total_tokens", 0),
                         "jobs_processed": ats_checked.get("jobs_processed", 0),
                         "results": ats_checked.get("results", [])
                     }
-                    
-                    # Categorize ATS results with filter URL context
+
                     ats_results = ats_checked.get("results", [])
                     for ats_result in ats_results:
+
+                        # ── Reconfirm against known provider lists ──────────────────
+                        ats_result = reconfirm_ats_result(ats_result)
+
                         job_info = {
                             "job_url": ats_result.get("job_url"),
-                            "filter_url": url,  # Track which filter URL led to this job
+                            "filter_url": url,
                             "ats_provider": ats_result.get("ats_provider"),
                             "confidence": ats_result.get("confidence"),
                             "reasoning": ats_result.get("reasoning"),
-                            "detection_method": ats_result.get("detection_method")
+                            "detection_method": ats_result.get("detection_method"),
+                            "reconfirmed": ats_result.get("_reconfirmed"),  # audit trail
                         }
-                        
+
                         if ats_result.get("status") == "success":
                             if ats_result.get("is_ats") == True:
-                                stats["ats_results"]["ats_true"].append(job_info)
+                                if ats_result.get("_unknown_ats"):
+                                    # ATS detected but provider not in any known list
+                                    stats["ats_results"]["ats_unknown"].append(job_info)
+                                else:
+                                    stats["ats_results"]["ats_true"].append(job_info)
                                 stats["ats_jobs_found"] += 1
                                 complete = True
                             elif ats_result.get("is_ats") == False:
                                 stats["ats_results"]["ats_false"].append(job_info)
                         else:
-                            # Status is "uncertain" or "error"
                             job_info["status"] = ats_result.get("status")
                             job_info["error"] = ats_result.get("error")
                             stats["ats_results"]["ats_uncertain"].append(job_info)
@@ -337,9 +453,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 
                 if complete == True:
                     break
-            # # Clean up browser BEFORE exiting context
-            # if browser:
-            #     await browser.stop()
+        
 
             # STILL INSIDE THE 'async with' BLOCK
             total_duration = time.time() - start_time
@@ -349,51 +463,44 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             priority_ats_detection = None
             
             if stats["ats_results"]["ats_true"]:
-                # Prioritize TRUE - take the first one
                 first_true = stats["ats_results"]["ats_true"][0]
                 priority_ats_detection = {
                     "ats_status": "true",
-                    "job_url": first_true["job_url"],
-                    "filter_url": first_true["filter_url"],
-                    "ats_provider": first_true["ats_provider"],
-                    "confidence": first_true["confidence"],
-                    "reasoning": first_true["reasoning"],
-                    "detection_method": first_true["detection_method"]
+                    **{k: first_true[k] for k in ("job_url", "filter_url", "ats_provider", "confidence", "reasoning", "detection_method")}
                 }
+
+            elif stats["ats_results"]["ats_unknown"]:
+                # ATS confirmed but provider not in any known list
+                first_unknown = stats["ats_results"]["ats_unknown"][0]
+                priority_ats_detection = {
+                    "ats_status": "unknown_ats",
+                    **{k: first_unknown[k] for k in ("job_url", "filter_url", "ats_provider", "confidence", "reasoning", "detection_method")}
+                }
+
             elif stats["ats_results"]["ats_false"]:
-                # Prioritize FALSE if no TRUE found
                 first_false = stats["ats_results"]["ats_false"][0]
                 priority_ats_detection = {
                     "ats_status": "false",
-                    "job_url": first_false["job_url"],
-                    "filter_url": first_false["filter_url"],
-                    "ats_provider": first_false.get("ats_provider"),  # Usually null for false
-                    "confidence": first_false["confidence"],
-                    "reasoning": first_false["reasoning"],
-                    "detection_method": first_false["detection_method"]
+                    **{k: first_false.get(k) for k in ("job_url", "filter_url", "ats_provider", "confidence", "reasoning", "detection_method")}
                 }
+
             elif stats["ats_results"]["ats_uncertain"]:
-                # Show UNCERTAIN if only uncertain results
                 first_uncertain = stats["ats_results"]["ats_uncertain"][0]
                 priority_ats_detection = {
                     "ats_status": "uncertain",
-                    "job_url": first_uncertain["job_url"],
-                    "filter_url": first_uncertain["filter_url"],
-                    "ats_provider": first_uncertain.get("ats_provider"),
-                    "confidence": first_uncertain.get("confidence", "uncertain"),
-                    "reasoning": first_uncertain["reasoning"],
-                    "detection_method": first_uncertain["detection_method"],
+                    **{k: first_uncertain.get(k) for k in ("job_url", "filter_url", "ats_provider", "confidence", "reasoning", "detection_method")},
                     "status": first_uncertain.get("status"),
                     "error": first_uncertain.get("error")
                 }
+                
             # Determine run_status based on results
             if stats["linkedin_indeed_redirects"] > 0:
                 run_status = "LinkedIn/Indeed Redirect"
+
             elif (
                 stats["access_blocked_scrapes"] > 0
                 and stats["access_blocked_scrapes"] == len(job_filtered)
             ):
-                # Determine the specific reason from the last/first blocked result
                 blocked_statuses = [
                     r["page_access_status"] for r in scrape_results
                     if r["page_access_status"] in ("bot_detected", "login_required")
@@ -404,15 +511,24 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     run_status = "Access Blocked - Bot Detected"
                 else:
                     run_status = "Access Blocked - Login Required"
+
             elif priority_ats_detection is None:
                 run_status = "No Jobs Found"
+
             elif priority_ats_detection["ats_status"] == "true":
                 provider = priority_ats_detection.get("ats_provider", "Unknown")
                 run_status = f"ATS Detected - {provider}"
+
+            elif priority_ats_detection["ats_status"] == "unknown_ats":
+                provider = priority_ats_detection.get("ats_provider", "Unknown")
+                run_status = f"ATS Detected - Unknown ({provider})"
+
             elif priority_ats_detection["ats_status"] == "false":
                 run_status = "No ATS - Direct Application"
+
             elif priority_ats_detection["ats_status"] == "uncertain":
                 run_status = "Uncertain - Manual Review Needed"
+
             else:
                 run_status = "Completed"
             
@@ -448,7 +564,16 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     message_parts.append(f"    {status_info} | Filter: {job['filter_url']}")
                     if job.get('reasoning'):
                         message_parts.append(f"    Reason: {job['reasoning'][:100]}")
-            
+                        
+            # Unknown ATS summary
+            if stats["ats_results"]["ats_unknown"]:
+                ats_unknown_count = len(stats["ats_results"]["ats_unknown"])
+                message_parts.append(f"\n~ Unknown ATS Detected ({ats_unknown_count} jobs):")
+                for job in stats["ats_results"]["ats_unknown"]:
+                    provider = job.get('ats_provider', 'Unknown')
+                    message_parts.append(f"  • {job['job_url']}")
+                    message_parts.append(f"    Provider: {provider} (unrecognised) | Filter: {job['filter_url']}")
+                    
             # Additional stats
             if stats["linkedin_indeed_redirects"] > 0:
                 message_parts.append(f"\n{stats['linkedin_indeed_redirects']} URL(s) redirected to LinkedIn/Indeed.")
@@ -484,9 +609,11 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                         "ats_true_count": len(stats["ats_results"]["ats_true"]),
                         "ats_false_count": len(stats["ats_results"]["ats_false"]),
                         "ats_uncertain_count": len(stats["ats_results"]["ats_uncertain"]),
+                        "ats_unknown_count": len(stats["ats_results"]["ats_unknown"]),   # ← MISSING
                         "ats_true_jobs": stats["ats_results"]["ats_true"],
                         "ats_false_jobs": stats["ats_results"]["ats_false"],
-                        "ats_uncertain_jobs": stats["ats_results"]["ats_uncertain"]
+                        "ats_uncertain_jobs": stats["ats_results"]["ats_uncertain"],
+                        "ats_unknown_jobs": stats["ats_results"]["ats_unknown"],          # ← MISSING
                     }
                 },
                 "scrape_results": scrape_results
@@ -498,13 +625,6 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             "Scraper task was cancelled",
             extra={"domain": domain, "agent_id": agent_id},
         )
-        
-        # Clean up browser if it exists
-        if browser:
-            try:
-                await browser.stop()
-            except Exception as e:
-                logger.error(f"Error stopping browser during cancellation: {e}")
         
         total_duration = time.time() - start_time
         
@@ -534,15 +654,6 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             exc_info=True,
         )
         
-        # Clean up browser if it exists
-        # if browser:
-        #     try:
-        #         await browser.stop()
-        #     except Exception as cleanup_error:
-        #         logger.error(
-        #             "Error stopping browser during cleanup",
-        #             extra={"error": str(cleanup_error)},
-        #         )
         
         total_duration = time.time() - start_time
     
