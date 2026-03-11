@@ -214,3 +214,4 @@ mongo-data
 source/job_outputs
 source/app.log
 source/tasks_db.json
+source/domain_lists
