@@ -24,7 +24,7 @@ from pathlib import Path
 import tldextract
 import time
 from urllib.parse import urlparse
-
+from utils.llm_prompt import create_career_url_prediction_prompt
 
 # Configure logging
 logger = setup_logger(__name__)
@@ -339,7 +339,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             start_time = time.time()
             complete = False
             # SCRAPING LOOP MUST BE INSIDE THE 'async with' BLOCK
-
+         
             for url in job_filtered:
                 url = tracker.normalize_full_path(url, domain)
 
@@ -365,6 +365,8 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     "result_type": None,
                     "page_access_status": result.page_access_status,
                     "page_access_issue_detail": result.page_access_issue_detail,
+                    "job_alert": result.job_alert,
+                    "manual_review": result.manual_review,
                     "jobs": {
                         "count": len(result.job_detail_urls),
                         "job_urls": result.job_detail_urls
@@ -379,7 +381,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     },
                     "error": result.error
                 }
-                if result.page_access_status in ("bot_detected", "login_required"):
+                if result.page_access_status != "accessible":
                     scrape_result["result_type"] = "access_blocked"
                     stats["access_blocked_scrapes"] += 1
                     
@@ -387,9 +389,6 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     scrape_result["result_type"] = "linkedin_indeed_redirect"
                     stats["linkedin_indeed_redirects"] += 1
                     
-                elif result.error:
-                    scrape_result["result_type"] = "error"
-                    stats["failed_scrapes"] += 1
                     
                 elif result.job_detail_urls:
                     scrape_result["result_type"] = "jobs_found"
@@ -441,6 +440,10 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                             job_info["error"] = ats_result.get("error")
                             stats["ats_results"]["ats_uncertain"].append(job_info)
                             
+                elif result.error:
+                    scrape_result["result_type"] = "error"
+                    stats["failed_scrapes"] += 1
+                    
                 elif not result.success:
                     scrape_result["result_type"] = "no_jobs_found"
                     stats["failed_scrapes"] += 1
@@ -458,6 +461,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             # STILL INSIDE THE 'async with' BLOCK
             total_duration = time.time() - start_time
             
+   
             # Determine priority ATS result
             # Priority: true > false > uncertain > none
             priority_ats_detection = None
@@ -513,7 +517,34 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     run_status = "Access Blocked - Login Required"
 
             elif priority_ats_detection is None:
-                run_status = "No Jobs Found"
+                # Check for job alerts first
+                job_alert_urls = [
+                    r["url"] for r in scrape_results if r.get("job_alert")
+                ]
+
+                # Check for manual review flags
+                manual_review_items = [
+                    {
+                        "url": r["url"],
+                        "reason": r.get("scraping_details", {}).get("message")
+                    }
+                    for r in scrape_results if r.get("manual_review")
+                ]
+
+                if job_alert_urls and manual_review_items:
+                    alert_list = ", ".join(job_alert_urls)
+                    run_status = f"No Jobs Found - Job Alert Set ({alert_list}) | Manual Review Required"
+                elif job_alert_urls:
+                    alert_list = ", ".join(job_alert_urls)
+                    run_status = f"No Jobs Found - Job Alert Set ({alert_list})"
+                elif manual_review_items:
+                    review_list = "; ".join(
+                        f"{item['url']} — {item['reason']}" if item['reason'] else item['url']
+                        for item in manual_review_items
+                    )
+                    run_status = f"No Jobs Found - Manual Review Required: {review_list}"
+                else:
+                    run_status = "No Jobs Found"
 
             elif priority_ats_detection["ats_status"] == "true":
                 provider = priority_ats_detection.get("ats_provider", "Unknown")
@@ -583,11 +614,53 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
             
             summary_message = " ".join(message_parts)
 
+
+            # ── Career URL prediction ────────────────────────────────────────
+            career_url = None
+            career_url_confidence = None
+            career_url_reasoning = None
+
+            if priority_ats_detection is not None:
+                # Jobs were found — use the filter_url directly, no LLM needed
+                career_url = priority_ats_detection.get("filter_url")
+                career_url_confidence = 1.0
+                career_url_reasoning = "Derived from successful job scrape filter URL."
+
+            else:
+                # No jobs found — ask the LLM to predict the career URL
+                career_prompt = create_career_url_prediction_prompt(domain, scrape_results)
+                career_result = await analyzer.analyze_data(
+                    prompt=career_prompt,
+                    json_response=True,
+                )
+                total_tokens += career_result.token_usage
+
+                if career_result.success and career_result.response:
+                    career_url = career_result.response.get("career_url")
+                    career_url_confidence = career_result.response.get("confidence")
+                    career_url_reasoning = career_result.response.get("reasoning")
+
+                    logger.info(
+                        "Career URL predicted by LLM",
+                        extra={
+                            "domain": domain,
+                            "career_url": career_url,
+                            "confidence": career_url_confidence,
+                        },
+                    )
+
             return {
                 "domain": domain,
                 "success": stats["successful_scrapes"] > 0 or stats["linkedin_indeed_redirects"] > 0,
                 "message": summary_message,
                 "run_status": run_status,
+                
+                # Career URL
+                "career_url": {
+                    "url": career_url,
+                    "confidence": career_url_confidence,
+                    "reasoning": career_url_reasoning,
+                },
                 
                 # TOP-LEVEL PRIORITY ATS DETECTION
                 "ats_detection": priority_ats_detection,

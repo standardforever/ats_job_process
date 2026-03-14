@@ -11,15 +11,29 @@ import io
 # Tiered Career URL Matching
 # ---------------------------------------------------------------------------
 
+# TIER_1_SEGMENTS = {
+#     "jobs", "job", "job-opportunities", "jobs-opportunities", "opportunities",
+#     "work-with-us", "work-withus", "work-for-us", "careers-at",
+#     "current-vacancies", "vacancies", "vacancies-list", "open-roles",
+#     "available-roles", "positions", "join-our-team",
+# }
+
+# TIER_2_SEGMENTS = {
+#     "join-us", "joinus", "be-part-of-our-team", "become-a-member",
+#     "careers", "recruitment", "hiring", "work-with", "employment",
+# }
+
+# TIER_3_KEYWORDS = {"career", "job", "vacancy", "role", "recruitment"}
+
 TIER_1_SEGMENTS = {
     "jobs", "job", "job-opportunities", "jobs-opportunities", "opportunities",
-    "work-with-us", "work-withus", "work-for-us", "careers-at",
+    "work-with-us", "work-withus", "work-for-us",
     "current-vacancies", "vacancies", "vacancies-list", "open-roles",
     "available-roles", "positions", "join-our-team",
 }
 
 TIER_2_SEGMENTS = {
-    "join-us", "joinus", "be-part-of-our-team", "become-a-member",
+    "join-us", "joinus", "be-part-of-our-team", "careers-at",
     "careers", "recruitment", "hiring", "work-with", "employment",
 }
 
@@ -251,7 +265,8 @@ def flatten_job_record(job_record: dict) -> List[dict]:
 
 
     # Resolve career_url using tiered logic
-    career_url = extract_career_url(job_record)
+    # career_url = extract_career_url(job_record)
+    career_url = job_record.get('career_url', {}).get('url') or extract_career_url(job_record)
 
     row = {
         "task_id": job_record.get("_task_id", ""),

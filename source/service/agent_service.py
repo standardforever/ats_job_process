@@ -23,7 +23,7 @@ class JobEntry:
 
 @dataclass
 class JobScraperConfig:
-    max_navigation: int = 2
+    max_navigation: int = 5
     page_load_wait: float = 5.0
     openai_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
@@ -44,6 +44,7 @@ class ScrapeResult:
     job_alert: bool = False
     page_access_issue_detail: Optional[str] = None
     page_access_status: Optional[str] = None
+    manual_review: Optional[bool] = False
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -306,7 +307,7 @@ class TrackedJobScraper:
                 content = await self._extractor.extract()
 
                 if not content.structured_text:
-                    return ScrapeResult(jobs=all_jobs, visited_urls=self._current_visited, job_detail_urls=[j.url for j in all_jobs if j.url], success=False, error=content.raw_structure.get("error"))
+                    return ScrapeResult(jobs=all_jobs, visited_urls=self._current_visited, job_detail_urls=[j.url for j in all_jobs if j.url], success=False, error=content.raw_structure.get("error"), manual_review=True)
                 
                 logger.debug(
                     "Content extracted",
@@ -451,7 +452,8 @@ class TrackedJobScraper:
                             total_token=total_token, llm_reasoning=llm_reasoning,
                             job_alert=job_alert,
                             page_access_issue_detail=page_access_issue_detail,
-                            page_access_status=page_access_status
+                            page_access_status=page_access_status,
+                            manual_review=True
                         )
 
                     nav_target = result.get("next_action_target", {})
@@ -560,7 +562,8 @@ class TrackedJobScraper:
                         total_token=total_token, llm_reasoning=llm_reasoning,
                         job_alert=job_alert,
                         page_access_issue_detail=page_access_issue_detail,
-                        page_access_status=page_access_status
+                        page_access_status=page_access_status,
+                        manual_review= True
                     )
 
                 logger.debug(
@@ -587,7 +590,8 @@ class TrackedJobScraper:
                 total_token=total_token,
                 job_alert=job_alert,
                 page_access_issue_detail=page_access_issue_detail,
-                page_access_status=page_access_status
+                page_access_status=page_access_status,
+                manual_review=True
             )
         except Exception as e:
             logger.error(
@@ -605,7 +609,8 @@ class TrackedJobScraper:
                 llm_reasoning=llm_reasoning,
                 job_alert=job_alert,
                 page_access_issue_detail=page_access_issue_detail,
-                page_access_status=page_access_status
+                page_access_status=page_access_status,
+                manual_review=True
                 
             ) 
 

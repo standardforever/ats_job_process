@@ -1,6 +1,51 @@
 
 
 from typing import Dict, Any
+import json
+
+def create_career_url_prediction_prompt(domain: str, scrape_results: list) -> str:
+    entries = []
+    for r in scrape_results:
+        entry = {
+            "url": r.get("url"),
+            "result_type": r.get("result_type"),
+            "page_access_status": r.get("page_access_status"),
+            "reasoning": r.get("scraping_details", {}).get("llm_reasoning"),
+            "visited_urls": r.get("scraping_details", {}).get("visited_urls", []),
+        }
+        entries.append(entry)
+
+    data = json.dumps(entries, indent=2)
+
+    return f"""You are given scraping results for the domain: {domain}
+
+Below is a list of URLs that were scraped, along with LLM reasoning and visited URLs from each scrape attempt.
+
+SCRAPE DATA:
+{data}
+
+TASK:
+Based on the URLs visited, the reasoning, and the result types above, identify the single most likely canonical careers/jobs page URL for this domain.
+
+RULES:
+- The career URL must belong to the domain: {domain}
+- Prefer URLs that were actually visited and led to job listings
+- If a redirect to LinkedIn or Indeed was detected, return that redirect URL as the career URL
+- If nothing conclusive can be determined, return null
+
+BASE URL RULE:
+- If a URL in the data starts with "/" attach it to the domain like: https://{domain} + link
+- If a URL already starts with "http://" or "https://", use it as-is
+
+Return ONLY valid JSON. No markdown, no extra text. Start with {{ and end with }}.
+
+RESPONSE SCHEMA:
+{{
+    "career_url": "<full URL or null>",
+    "confidence": <float 0.0-1.0>,
+    "reasoning": "<brief explanation of why this URL was chosen>"
+}}
+"""
 
 
 def create_job_page_analysis_prompt(url: str | None, text: str) -> str:
@@ -65,21 +110,18 @@ RULES:
 - Extract ALL jobs visible on the page only
 
 
-URL RESOLUTION RULE:
-- When extracting job_url from links:
-  - If the link starts with "/" (e.g. "/opportunities/role-x"):
-    • Build the full URL as: scheme + "://" + domain_name + link
-    • Example 1:
-      Base URL: https://www.site.com/community/opportunities
-      Link: /opportunities/family-arts-conference-2026-changemakers-storytellers
-      Result: https://www.site.com/opportunities/family-arts-conference-2026-changemakers-storytellers
-    • Example 2:
-      Base URL: https://job.site.com/string
-      Link: /role-x
-      Result: https://job.site.com/role-x
-  - If the link already starts with "http://" or "https://":
-    • Use it as-is
-  - Do NOT guess, infer, or modify URLs beyond these rules
+RULE — Resolving job_url from extracted links:
+BASE URL: {url}
+- Case 1 — Link starts with "/":
+  Take the Base URL above, remove everything after the domain name, then attach the link.
+  The domain name includes any subdomain — do not remove it.
+
+  BASE: https://www.site.com/community/jobs   +  /role-x  →  https://www.site.com/role-x
+  BASE: https://jobs.site.com/board           +  /role-x  →  https://jobs.site.com/role-x
+
+- Case 2 — Link starts with "http://" or "https://":
+  Use it exactly as found. Do not change anything.
+- Do not guess, infer, or modify URLs beyond these two cases.
 
 
 JOB ALERT DETECTION RULE:
