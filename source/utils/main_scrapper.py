@@ -382,7 +382,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     "error": result.error
                 }
                 
-                if result.page_access_status != "accessible" or result.page_access_status != None:
+                if result.page_access_status != "accessible" and result.page_access_status is not None:
                     scrape_result["result_type"] = "access_blocked"
                     stats["access_blocked_scrapes"] += 1
                     
