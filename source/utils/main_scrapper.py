@@ -381,7 +381,8 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                     },
                     "error": result.error
                 }
-                if result.page_access_status != "accessible":
+                
+                if result.page_access_status != "accessible" or result.page_access_status != None:
                     scrape_result["result_type"] = "access_blocked"
                     stats["access_blocked_scrapes"] += 1
                     
@@ -558,7 +559,7 @@ async def main_scrapper(domain: str, llm_model: str = "gpt-5-nano", agent_id: in
                 run_status = "No ATS - Direct Application"
 
             elif priority_ats_detection["ats_status"] == "uncertain":
-                run_status = "Uncertain - Manual Review Needed"
+                run_status = f"ATS Uncertain - Manual Review Needed ({priority_ats_detection.get('job_url')})"
 
             else:
                 run_status = "Completed"

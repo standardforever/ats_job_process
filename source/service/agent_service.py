@@ -281,6 +281,7 @@ class TrackedJobScraper:
             nav_count = 0
             all_jobs: list[JobEntry] = []
             total_token = 0
+            page_access_issue_detail = None
             llm_reasoning = []
             self._current_visited = []
             job_alert = False
@@ -718,19 +719,19 @@ class TrackedJobScraper:
             current_url = page.url
             
             # CRITICAL: Check if we were redirected
-            redirect_info = self._check_redirect(job_url, current_url, domain)
-            if redirect_info["redirected"]:
-                return {
-                    "status": "uncertain",
-                    "job_url": job_url,
-                    "current_url": current_url,
-                    "is_ats": None,
-                    "confidence": "uncertain",
-                    "reasoning": redirect_info["reason"],
-                    "redirect_type": redirect_info["type"],
-                    "requires_manual_review": True,
-                    "token_usage": token_usage
-                }
+            # redirect_info = self._check_redirect(job_url, current_url, domain)
+            # if redirect_info["redirected"]:
+            #     return {
+            #         "status": "uncertain",
+            #         "job_url": job_url,
+            #         "current_url": current_url,
+            #         "is_ats": None,
+            #         "confidence": "uncertain",
+            #         "reasoning": redirect_info["reason"],
+            #         "redirect_type": redirect_info["type"],
+            #         "requires_manual_review": True,
+            #         "token_usage": token_usage
+            #     }
             
             # Extract and analyze
             text_extracted = await self._extractor.extract()

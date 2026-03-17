@@ -52,7 +52,7 @@ class TaskStatus(str, Enum):
 
 class ScrapeRequest(BaseModel):
     urls: List[str] = Field(..., min_items=1, description="List of domains to scrape")
-    num_agents: int = Field(default=2, ge=1, le=5, description="Number of parallel agents")
+    num_agents: int = Field(default=2, ge=1, le=6, description="Number of parallel agents")
 
 
 class TaskResponse(BaseModel):
@@ -426,7 +426,7 @@ async def start_scraping(
 async def start_scraping_from_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = Depends(validate_spreadsheet_file),
-    num_agents: int = Form(default=2, ge=1, le=5, description="Number of parallel agents"),
+    num_agents: int = Form(default=2, ge=1, le=6, description="Number of parallel agents"),
     domain_column: str = Form(default="domain", description="Name of the column containing domains"),
     task_id: str = Form(default=None, description="Task ID you want to rerun"),
 ):
