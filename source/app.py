@@ -53,6 +53,7 @@ class TaskStatus(str, Enum):
 class ScrapeRequest(BaseModel):
     urls: List[str] = Field(..., min_items=1, description="List of domains to scrape")
     num_agents: int = Field(default=2, ge=1, le=6, description="Number of parallel agents")
+    task_id: Optional[str] = None
 
 
 class TaskResponse(BaseModel):
@@ -387,8 +388,7 @@ async def start_scraping(
     """
     # Check if any task is already running
     check_can_start_new_task()
-    
-    task_id = str(uuid4())
+    task_id = request.task_id or  str(uuid4())
     
     # Initialize task tracking
     tasks_db.set(task_id, {
